@@ -39,12 +39,8 @@ class _UnitasAppState extends State<UnitasApp> {
   }
 
   Future<void> _checkAuth() async {
-    try {
-      final loggedIn = await AuthService.isLoggedIn();
-      if (mounted) setState(() => _loggedIn = loggedIn);
-    } catch (_) {
-      if (mounted) setState(() => _loggedIn = false);
-    }
+    final loggedIn = await AuthService.isLoggedIn();
+    if (mounted) setState(() => _loggedIn = loggedIn);
   }
 
   void _onLoginSuccess() => setState(() => _loggedIn = true);

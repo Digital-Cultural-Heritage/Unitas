@@ -6,6 +6,9 @@ import '../core/api/stats_service.dart';
 import '../core/api/users_service.dart';
 import '../core/api/auth_service.dart';
 import '../widgets/avatar.dart';
+import 'package:image_picker/image_picker.dart';
+import 'post_detail_screen.dart';
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _posting = false;
   final Map<String, bool> _likedMap = {};
   final _postCtrl = TextEditingController();
+  XFile? _selectedImage;
 
   @override
   void dispose() {
@@ -53,7 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final results = await Future.wait([
         StatsService.getStats(),
         PostsService.getLeaderboard(limit: 3),
-        UsersService.getMe().catchError((_) => {}),
+        UsersService.getMe().catchError((_) => <String, dynamic>{}),
       ]);
       if (mounted) {
         setState(() {
@@ -103,11 +107,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Map<String, dynamic> _profile(Map<String, dynamic> post) {
-    final user = post['user'];
-    if (user == null) return {};
+    final user = post['user'] as Map?;
+    if (user == null) return <String, dynamic>{};
     final profiles = user['user_profiles'];
+    if (profiles is Map) return Map<String, dynamic>.from(profiles);
     if (profiles is List && profiles.isNotEmpty) return Map<String, dynamic>.from(profiles[0]);
-    return {};
+    return <String, dynamic>{};
   }
 
   String _meInitials() {
@@ -128,13 +133,27 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${diff.inDays}h';
   }
 
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (picked != null) {
+      setState(() => _selectedImage = picked);
+    }
+  }
+
   Future<void> _createPost() async {
     final text = _postCtrl.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _selectedImage == null) return;
     setState(() => _posting = true);
     try {
-      await PostsService.createPost(text);
+      String? imageUrl;
+      if (_selectedImage != null) {
+        final bytes = await _selectedImage!.readAsBytes();
+        imageUrl = await PostsService.uploadImage(bytes, _selectedImage!.name);
+      }
+      await PostsService.createPost(text, imageUrl: imageUrl);
       _postCtrl.clear();
+      _selectedImage = null;
       FocusScope.of(context).unfocus();
       _load(); // Reload feed to show new post
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Postingan berhasil dikirim')));
@@ -150,7 +169,10 @@ class _HomeScreenState extends State<HomeScreen> {
     Color(0xFF7A4B2B), Color(0xFF2D6060), Color(0xFF6B2A4F),
   ];
 
-  Color _colorFor(int idx) => _avatarColors[idx % _avatarColors.length];
+  Color _colorFor(String text) {
+    final hash = text.hashCode.abs();
+    return _avatarColors[hash % _avatarColors.length];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -165,7 +187,6 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildHeader(),
-              _buildSearch(),
               _buildStats(),
               _buildComposer(),
               _buildLeaderboard(),
@@ -201,26 +222,10 @@ class _HomeScreenState extends State<HomeScreen> {
               )),
             ]),
             const SizedBox(width: 10),
-            UnitasAvatar(initials: initials, color: _colorFor(0), size: 36),
+            UnitasAvatar(initials: initials, color: _colorFor(_me?['id'] ?? 'me'), size: 36),
           ]),
         ],
       ),
-    );
-  }
-
-  Widget _buildSearch() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-        color: surface, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor),
-      ),
-      child: Row(children: [
-        const Icon(Icons.search, color: Color(0x611E3A5F), size: 16),
-        const SizedBox(width: 10),
-        Text('Cari alumni, acara, lowongan…', style: body.copyWith(color: dim2)),
-      ]),
     );
   }
 
@@ -266,7 +271,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Column(children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          UnitasAvatar(initials: initials, color: _colorFor(0), size: 32),
+          UnitasAvatar(initials: initials, color: _colorFor(_me?['id'] ?? 'me'), size: 32),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
@@ -286,11 +291,25 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           // Hanya foto (video dihapus)
-          Row(children: [
-            Icon(Icons.image_outlined, color: dim2, size: 16),
-            const SizedBox(width: 5),
-            Text('Foto', style: caption),
-          ]),
+          GestureDetector(
+            onTap: _pickImage,
+            behavior: HitTestBehavior.opaque,
+            child: Row(children: [
+              Icon(Icons.image_outlined, color: _selectedImage != null ? brandNavy : dim2, size: 16),
+              const SizedBox(width: 5),
+              Text(_selectedImage != null ? 'Foto terpilih' : 'Foto', style: caption.copyWith(
+                color: _selectedImage != null ? brandNavy : dim2,
+                fontWeight: _selectedImage != null ? FontWeight.w600 : FontWeight.w400,
+              )),
+              if (_selectedImage != null) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => setState(() => _selectedImage = null),
+                  child: const Icon(Icons.close, size: 14, color: Colors.red),
+                ),
+              ],
+            ]),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: brandNavy, foregroundColor: Colors.white,
@@ -349,7 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? const Icon(Icons.military_tech, color: brandNavy, size: 16)
                     : SizedBox(width: 16, child: Text('$rank', style: caption, textAlign: TextAlign.center)),
                   const SizedBox(width: 12),
-                  UnitasAvatar(initials: ini, color: _colorFor(i), size: 34),
+                  UnitasAvatar(initials: ini, color: _colorFor(item['user_id'] ?? name), size: 34),
                   const SizedBox(width: 12),
                   Expanded(child: Text(name, style: subTitle)),
                   Text(pts, style: subTitle.copyWith(
@@ -401,23 +420,33 @@ class _HomeScreenState extends State<HomeScreen> {
             final likes = post['likes_count'] ?? 0;
             final comments = post['comments_count'] ?? 0;
             final liked = _likedMap[id] ?? false;
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: surface, borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: borderColor),
-              ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  UnitasAvatar(initials: initials, color: _colorFor(i)),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(name, style: subTitle),
-                    Text('$prodi · $angk · ${_timeAgo(post['created_at'])}', style: caption),
-                  ])),
-                  const Icon(Icons.more_vert, color: Color(0x611E3A5F), size: 18),
-                ]),
+            return GestureDetector(
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => PostDetailScreen(
+                    post: post,
+                    onPostDeleted: _load,
+                  )),
+                );
+                _load(); // Reload feed to update comments count
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: surface, borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    UnitasAvatar(initials: initials, color: _colorFor(post['user_id'] ?? name)),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(name, style: subTitle),
+                      Text('$prodi · $angk · ${_timeAgo(post['created_at'])}', style: caption),
+                    ])),
+                  ]),
                 const SizedBox(height: 10),
                 Text(post['content'] ?? '', style: body.copyWith(height: 1.6)),
                 if (post['image_url'] != null) ...[
@@ -451,9 +480,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   Icon(Icons.share_outlined, color: dim2, size: 16),
                 ]),
               ]),
-            );
-          }),
+            ),
+          );
+        }).toList(),
       ]),
     );
+
   }
 }

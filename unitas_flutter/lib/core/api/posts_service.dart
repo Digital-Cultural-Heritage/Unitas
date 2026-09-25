@@ -19,6 +19,28 @@ class PostsService {
     return Map<String, dynamic>.from(res);
   }
 
+  // ── Upload Image ───────────────────────────────────────────────────────
+  static Future<String> uploadImage(List<int> bytes, String filename) async {
+    final res = await ApiClient.uploadFile('/api/upload/post', bytes: bytes, filename: filename);
+    return res['url'] as String;
+  }
+
+  // ── Comments ───────────────────────────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getComments(String postId) async {
+    final res = await ApiClient.get('/api/posts/$postId/comments');
+    return (res['data'] as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<Map<String, dynamic>> addComment(String postId, String content) async {
+    final res = await ApiClient.post('/api/posts/$postId/comments', body: {'content': content});
+    return Map<String, dynamic>.from(res);
+  }
+
+  // ── Delete Post ────────────────────────────────────────────────────────
+  static Future<void> deletePost(String postId) async {
+    await ApiClient.delete('/api/posts/$postId');
+  }
+
   // ── Toggle like ────────────────────────────────────────────────────────
   static Future<bool> toggleLike(String postId) async {
     final res = await ApiClient.post('/api/posts/$postId/like');

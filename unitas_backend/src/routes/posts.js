@@ -1,11 +1,11 @@
-const express = require("express");
+ï»¿const express = require("express");
 const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
-// -- GET /api/posts — Feed -------------------------------------------------
+// -- GET /api/posts â€” Feed -------------------------------------------------
 router.get("/", async (req, res, next) => {
   try {
     const { page = 1, limit = 20 } = req.query;
@@ -27,7 +27,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// -- POST /api/posts — Buat post -------------------------------------------
+// -- POST /api/posts â€” Buat post -------------------------------------------
 router.post(
   "/",
   requireAuth,
@@ -76,7 +76,7 @@ router.delete("/:id", requireAuth, async (req, res, next) => {
   }
 });
 
-// -- POST /api/posts/:id/like — Toggle like --------------------------------
+// -- POST /api/posts/:id/like â€” Toggle like --------------------------------
 router.post("/:id/like", requireAuth, async (req, res, next) => {
   try {
     const postId = req.params.id;
@@ -118,5 +118,57 @@ router.get("/leaderboard", async (req, res, next) => {
     next(err);
   }
 });
+
+// -- GET /api/posts/:id/comments - Get comments -----------------------------
+router.get("/:id/comments", async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("post_comments")
+      .select(`
+        id, content, created_at,
+        user:user_id(id, user_profiles(full_name, initials, avatar_url))
+      `)
+      .eq("post_id", req.params.id)
+      .order("created_at", { ascending: true });
+    
+    if (error) throw error;
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- POST /api/posts/:id/comments - Add comment -----------------------------
+router.post(
+  "/:id/comments",
+  requireAuth,
+  [body("content").notEmpty().withMessage("Komentar tidak boleh kosong")],
+  async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    
+    try {
+      const postId = req.params.id;
+      const { content } = req.body;
+      
+      const { data, error } = await supabase
+        .from("post_comments")
+        .insert({ post_id: postId, user_id: req.user.userId, content })
+        .select(`
+          id, content, created_at,
+          user:user_id(id, user_profiles(full_name, initials, avatar_url))
+        `)
+        .single();
+        
+      if (error) throw error;
+      
+      await supabase.rpc("increment_points", { uid: req.user.userId, pts: 2 });
+      
+      res.status(201).json(data);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 module.exports = router;

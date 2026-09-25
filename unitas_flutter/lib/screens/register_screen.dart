@@ -43,6 +43,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         angkatan: _angkCtrl.text.trim(),
         kota: _kotaCtrl.text.trim(),
       );
+      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
       widget.onRegisterSuccess();
     } on ApiException catch (e) {
       setState(() => _error = e.message);

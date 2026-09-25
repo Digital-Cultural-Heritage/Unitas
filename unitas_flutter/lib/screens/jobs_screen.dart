@@ -82,6 +82,9 @@ class _JobsScreenState extends State<JobsScreen> {
     final poster = job['poster'];
     if (poster == null) return '';
     final profiles = poster['user_profiles'];
+    if (profiles is Map) {
+      return "${profiles['full_name'] ?? ''} '${(profiles['angkatan'] ?? '').toString().length >= 2 ? (profiles['angkatan'] ?? '').toString().substring(2) : ''}";
+    }
     if (profiles is List && profiles.isNotEmpty) {
       final p = profiles[0];
       return "${p['full_name'] ?? ''} '${(p['angkatan'] ?? '').toString().length >= 2 ? (p['angkatan'] ?? '').toString().substring(2) : ''}";
