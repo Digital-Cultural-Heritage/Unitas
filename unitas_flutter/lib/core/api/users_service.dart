@@ -1,4 +1,4 @@
-import 'api_client.dart';
+﻿import 'api_client.dart';
 
 class UsersService {
   // ── Directory ──────────────────────────────────────────────────────────
@@ -41,5 +41,16 @@ class UsersService {
     final res = await ApiClient.get('/api/users/me/connections');
     final list = res['data'] as List? ?? [];
     return list.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  // ── Incoming Requests ──────────────────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getIncomingRequests() async {
+    final res = await ApiClient.get('/api/users/me/requests');
+    final list = res['data'] as List? ?? [];
+    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  static Future<void> respondRequest(String requestId, String action) async {
+    await ApiClient.put('/api/users/requests/$requestId', body: {'action': action});
   }
 }

@@ -207,10 +207,10 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                             ),
                             onPressed: () async {
                               try {
-                                await UsersService.connect(userId);
+                                final res = await UsersService.connect(userId);
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Permintaan koneksi dikirim')));
+                                  SnackBar(content: Text(res['message'] ?? 'Permintaan koneksi dikirim')));
                               } catch (_) {}
                             },
                             child: Text(isOnline ? 'Terhubung' : 'Hubungi',

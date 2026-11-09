@@ -9,10 +9,12 @@ import 'screens/directory_screen.dart';
 import 'screens/events_screen.dart';
 import 'screens/jobs_screen.dart';
 import 'screens/profile_screen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+Future<void> main() async {
   // Synchronous — jangan panggil plugin apapun di sini
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,

@@ -2,11 +2,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Ganti dengan URL backend kamu.
 /// Dev: http://localhost:3002
 /// Prod: https://your-app.vercel.app
-const String kBaseUrl = 'http://localhost:3002';
+String get kBaseUrl => dotenv.env['BACKEND_URL'] ?? 'http://localhost:3002';
 
 class ApiClient {
   // ── Token storage ──────────────────────────────────────────────────────

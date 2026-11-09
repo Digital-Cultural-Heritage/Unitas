@@ -1,7 +1,7 @@
-﻿const express = require("express");
+const express = require("express");
 const multer = require("multer");
 const sharp = require("sharp");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
 
@@ -71,7 +71,7 @@ router.post("/post", requireAuth, upload.single("file"), async (req, res, next) 
       .withMetadata(false)
       .toBuffer();
 
-    const fileName = `${uuidv4()}.webp`;
+    const fileName = `${crypto.randomUUID()}.webp`;
 
     const { error: uploadErr } = await supabase.storage
       .from("post-images")

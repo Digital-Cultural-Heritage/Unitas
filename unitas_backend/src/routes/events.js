@@ -1,11 +1,11 @@
-﻿const express = require("express");
+const express = require("express");
 const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
-// ── GET /api/events ───────────────────────────────────────────────────────
+// -- GET /api/events -------------------------------------------------------
 router.get("/", async (req, res, next) => {
   try {
     const { category, page = 1, limit = 20 } = req.query;
@@ -34,7 +34,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// ── GET /api/events/:id ───────────────────────────────────────────────────
+// -- GET /api/events/:id ---------------------------------------------------
 router.get("/:id", async (req, res, next) => {
   try {
     const { data, error } = await supabase
@@ -51,7 +51,7 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-// ── POST /api/events — Buat acara (semua user ber-JWT) ────────────────────
+// -- POST /api/events � Buat acara (semua user ber-JWT) --------------------
 router.post(
   "/",
   requireAuth,
@@ -85,7 +85,7 @@ router.post(
   }
 );
 
-// ── POST /api/events/:id/register — Daftar ke acara ──────────────────────
+// -- POST /api/events/:id/register � Daftar ke acara ----------------------
 router.post("/:id/register", requireAuth, async (req, res, next) => {
   try {
     const { id: eventId } = req.params;
@@ -116,7 +116,7 @@ router.post("/:id/register", requireAuth, async (req, res, next) => {
   }
 });
 
-// ── DELETE /api/events/:id/register — Batal daftar ───────────────────────
+// -- DELETE /api/events/:id/register � Batal daftar -----------------------
 router.delete("/:id/register", requireAuth, async (req, res, next) => {
   try {
     const { error } = await supabase
@@ -126,6 +126,83 @@ router.delete("/:id/register", requireAuth, async (req, res, next) => {
       .eq("user_id", req.user.userId);
     if (error) throw error;
     res.json({ message: "Pendaftaran dibatalkan" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- GET /api/events/my-events -----------------------------------------------
+router.get("/my-events/all", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("events")
+      .select(`
+        id, title, description, category, event_date, start_time, end_time,
+        location, is_online, cover_url, attendee_count, created_at
+      `)
+      .eq("creator_id", req.user.userId)
+      .order("event_date", { ascending: false });
+    
+    if (error) throw error;
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- GET /api/events/:id/attendees -------------------------------------------
+router.get("/:id/attendees", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("event_registrations")
+      .select(`
+        id, registered_at,
+        user:user_id(id, user_profiles(full_name, initials, avatar_url, prodi, angkatan))
+      `)
+      .eq("event_id", req.params.id)
+      .order("registered_at", { ascending: false });
+      
+    if (error) throw error;
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- PUT /api/events/:id -----------------------------------------------------
+router.put("/:id", requireAuth, async (req, res, next) => {
+  try {
+    const { data: ev } = await supabase.from("events").select("creator_id").eq("id", req.params.id).single();
+    if (!ev) return res.status(404).json({ error: "Acara tidak ditemukan" });
+    if (ev.creator_id !== req.user.userId) return res.status(403).json({ error: "Tidak diizinkan" });
+    
+    const { title, description, category, event_date, start_time, end_time, location, is_online, cover_url } = req.body;
+    const { data, error } = await supabase
+      .from("events")
+      .update({
+        title, description, category, event_date, start_time, end_time, location, is_online, cover_url
+      })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+      
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- DELETE /api/events/:id --------------------------------------------------
+router.delete("/:id", requireAuth, async (req, res, next) => {
+  try {
+    const { data: ev } = await supabase.from("events").select("creator_id").eq("id", req.params.id).single();
+    if (!ev) return res.status(404).json({ error: "Acara tidak ditemukan" });
+    if (ev.creator_id !== req.user.userId) return res.status(403).json({ error: "Tidak diizinkan" });
+    
+    const { error } = await supabase.from("events").delete().eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ message: "Acara dihapus" });
   } catch (err) {
     next(err);
   }

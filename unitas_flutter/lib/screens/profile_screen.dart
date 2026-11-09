@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/users_service.dart';
 import '../core/api/auth_service.dart';
+import '../widgets/avatar.dart';
 import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -15,6 +16,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   String _tab = 'tentang';
   Map<String, dynamic>? _profile;
+  List<Map<String, dynamic>> _connections = [];
+  List<Map<String, dynamic>> _requests = [];
   bool _loading = true;
 
   @override
@@ -25,12 +28,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _load() async {
     try {
-      final data = await UsersService.getMe();
-      if (mounted) setState(() { _profile = data; _loading = false; });
+      final results = await Future.wait([
+        UsersService.getMe(),
+        UsersService.getMyConnections().catchError((_) => <Map<String, dynamic>>[]),
+        UsersService.getIncomingRequests().catchError((_) => <Map<String, dynamic>>[]),
+      ]);
+      if (mounted) {
+        setState(() {
+          _profile = results[0] as Map<String, dynamic>?;
+          _connections = results[1] as List<Map<String, dynamic>>;
+          _requests = results[2] as List<Map<String, dynamic>>;
+          _loading = false;
+        });
+      }
     } catch (_) {
-      // Fallback ke stored user
       final stored = await AuthService.getStoredUser();
       if (mounted) setState(() { _profile = stored; _loading = false; });
+    }
+  }
+
+  Future<void> _respond(String id, String action) async {
+    try {
+      await UsersService.respondRequest(id, action);
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal merespons')));
     }
   }
 
@@ -62,11 +85,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  String _initials() {
-    final name = _profile?['full_name'] ?? '';
+  String _initials(Map<String, dynamic>? p) {
+    final name = p?['full_name'] ?? '';
     final parts = name.split(' ');
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+
+  Color _colorFor(String text) {
+    final colors = [
+      const Color(0xFF1E3A5F), const Color(0xFF2E7D32),
+      const Color(0xFFC62828), const Color(0xFFE65100),
+      const Color(0xFF0277BD), const Color(0xFF6A1B9A),
+    ];
+    final hash = text.hashCode.abs();
+    return colors[hash % colors.length];
   }
 
   @override
@@ -118,7 +151,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             border: Border.all(color: brandBg, width: 2),
                           ),
                           alignment: Alignment.center,
-                          child: Text(_initials(), style: heading.copyWith(color: Colors.white, fontSize: 20)),
+                          child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
                         ),
                     OutlinedButton(
                       style: OutlinedButton.styleFrom(
@@ -153,7 +186,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // Stats
                   Row(children: [
                     {'val': '${_profile?['points'] ?? 0}', 'label': 'Poin'},
-                    {'val': '—', 'label': 'Koneksi'},
+                    {'val': '${_connections.length}', 'label': 'Koneksi'},
                     {'val': '—', 'label': 'Acara'},
                   ].asMap().entries.map((e) {
                     final i = e.key; final s = e.value;
@@ -180,7 +213,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   }).toList()),
                   const SizedBox(height: 20),
                   // Tabs
-                  Row(children: ['tentang', 'pencapaian', 'pengaturan'].map((t) =>
+                  Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
                     Expanded(child: GestureDetector(
                       onTap: () => setState(() => _tab = t),
                       child: Container(
@@ -191,7 +224,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           )),
                         ),
                         child: Text(
-                          '${t[0].toUpperCase()}${t.substring(1)}',
+                          '${t[0].toUpperCase()}${t.substring(1)}' + (t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : ''),
                           style: caption.copyWith(
                             color: _tab == t ? brandNavy : dim2,
                             fontWeight: _tab == t ? FontWeight.w600 : FontWeight.w400,
@@ -203,7 +236,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ).toList()),
                   const SizedBox(height: 20),
                   if (_tab == 'tentang') _buildTentang(),
-                  if (_tab == 'pencapaian') _buildPencapaian(),
+                  if (_tab == 'koneksi') _buildKoneksi(),
                   if (_tab == 'pengaturan') _buildPengaturan(),
                 ]),
           ),
@@ -237,36 +270,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ]);
   }
 
-  Widget _buildPencapaian() {
-    final items = [
-      {'label': 'Poin Komunitas', 'desc': '${_profile?['points'] ?? 0} poin', 'icon': Icons.emoji_events_outlined},
-      {'label': 'Bergabung', 'desc': 'Anggota Unitas', 'icon': Icons.military_tech_outlined},
-    ];
-    return Column(children: items.asMap().entries.map((e) {
-      final i = e.key; final a = e.value;
-      return Column(children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(children: [
-            Container(
-              width: 38, height: 38,
-              decoration: BoxDecoration(
-                color: const Color(0x1A1E3A5F),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: borderColor),
+  Widget _buildKoneksi() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (_requests.isNotEmpty) ...[
+        Text('Permintaan Masuk (${_requests.length})', style: label),
+        const SizedBox(height: 12),
+        ..._requests.map((req) {
+          final p = req['requester']?['user_profiles'];
+          if (p == null) return const SizedBox.shrink();
+          final String name = p['full_name'] ?? '—';
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
+            child: Row(children: [
+              UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: subTitle),
+                Text('${p['prodi'] ?? ''} · Angkatan ${p['angkatan'] ?? ''}', style: caption),
+              ])),
+              IconButton(
+                icon: const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                onPressed: () => _respond(req['id'].toString(), 'accept'),
               ),
-              child: Icon(a['icon'] as IconData, color: brandNavy, size: 18),
-            ),
-            const SizedBox(width: 14),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(a['label'] as String, style: subTitle),
-              Text(a['desc'] as String, style: caption),
+              IconButton(
+                icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
+                onPressed: () => _respond(req['id'].toString(), 'reject'),
+              ),
             ]),
-          ]),
-        ),
-        if (i < items.length - 1) const Divider(height: 1, color: Color(0x1A1E3A5F)),
-      ]);
-    }).toList());
+          );
+        }),
+        const SizedBox(height: 16),
+        const Divider(color: Color(0x1A1E3A5F)),
+        const SizedBox(height: 16),
+      ],
+      Text('Jaringan Saya (${_connections.length})', style: label),
+      const SizedBox(height: 12),
+      if (_connections.isEmpty)
+        Text('Belum ada koneksi. Jelajahi direktori untuk terhubung dengan alumni lain.', style: caption)
+      else
+        ..._connections.map((conn) {
+          // Identify the other person (not me)
+          final reqProfile = conn['requester']?['user_profiles'];
+          final addProfile = conn['addressee']?['user_profiles'];
+          final reqId = conn['requester']?['user_id'];
+          // Use the one that is NOT the current user
+          final p = reqId == _profile?['id'] ? addProfile : reqProfile;
+          if (p == null) return const SizedBox.shrink();
+          final String name = p['full_name'] ?? '—';
+          
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
+            child: Row(children: [
+              UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: subTitle),
+                if ((p['pekerjaan'] ?? '').isNotEmpty)
+                  Text('${p['pekerjaan']} · ${p['perusahaan'] ?? ''}', style: caption, overflow: TextOverflow.ellipsis),
+              ])),
+            ]),
+          );
+        }),
+    ]);
   }
 
   Widget _buildPengaturan() {

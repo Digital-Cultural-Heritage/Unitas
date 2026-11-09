@@ -15,7 +15,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
       .single();
     if (error) throw error;
 
-    const profile = data.user_profiles || {};
+    const profile = data.user_profiles?.[0] || {};
     res.json({ id: data.id, email: data.email, role: data.role, ...profile });
   } catch (err) {
     next(err);
@@ -43,7 +43,7 @@ router.put("/me", requireAuth, async (req, res, next) => {
   }
 });
 
-// -- GET /api/users — Direktori alumni ------------------------------------
+// -- GET /api/users ï¿½ Direktori alumni ------------------------------------
 router.get("/", async (req, res, next) => {
   try {
     const { q = "", prodi, kota, is_online, page = 1, limit = 20 } = req.query;
@@ -99,7 +99,7 @@ router.post("/:id/connect", requireAuth, async (req, res, next) => {
     // Cek sudah ada koneksi
     const { data: existing } = await supabase
       .from("alumni_connections")
-      .select("id, status")
+      .select("id, status, requester_id")
       .or(
         `and(requester_id.eq.${requesterId},addressee_id.eq.${addresseeId}),` +
         `and(requester_id.eq.${addresseeId},addressee_id.eq.${requesterId})`
@@ -155,4 +155,44 @@ router.get("/me/connections", requireAuth, async (req, res, next) => {
   }
 });
 
+
+// -- GET /api/users/me/requests -------------------------------------------
+router.get("/me/requests", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("alumni_connections")
+      .select(`
+        id, created_at,
+        requester:requester_id(id, user_profiles(full_name, avatar_url, prodi, angkatan))
+      `)
+      .eq("addressee_id", req.user.userId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- PUT /api/users/requests/:id ------------------------------------------
+router.put("/requests/:id", requireAuth, async (req, res, next) => {
+  try {
+    const { action } = req.body; // 'accept' or 'reject'
+    const status = action === 'accept' ? 'accepted' : 'rejected';
+    const { data, error } = await supabase
+      .from("alumni_connections")
+      .update({ status })
+      .eq("id", req.params.id)
+      .eq("addressee_id", req.user.userId)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+

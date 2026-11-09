@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/events_service.dart';
 import '../core/api/api_client.dart';
 import 'create_event_screen.dart';
+import 'manage_event_screen.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
@@ -14,8 +15,10 @@ class EventsScreen extends StatefulWidget {
 class _EventsScreenState extends State<EventsScreen> {
   String _active = 'Semua';
   List<Map<String, dynamic>> _events = [];
+  List<Map<String, dynamic>> _myEvents = [];
   final Set<String> _registered = {};
   bool _loading = true;
+  bool _loadingMyEvents = true;
 
   final List<String> _cats = ['Semua', 'Reuni', 'Seminar', 'Networking', 'Webinar'];
 
@@ -23,6 +26,7 @@ class _EventsScreenState extends State<EventsScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadMyEvents();
   }
 
   Future<void> _load() async {
@@ -37,6 +41,16 @@ class _EventsScreenState extends State<EventsScreen> {
     }
   }
 
+  Future<void> _loadMyEvents() async {
+    setState(() => _loadingMyEvents = true);
+    try {
+      final data = await EventsService.getMyEvents();
+      if (mounted) setState(() { _myEvents = data; _loadingMyEvents = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMyEvents = false);
+    }
+  }
+
   Future<void> _toggleReg(String id) async {
     final isReg = _registered.contains(id);
     setState(() { isReg ? _registered.remove(id) : _registered.add(id); });
@@ -47,7 +61,6 @@ class _EventsScreenState extends State<EventsScreen> {
         await EventsService.register(id);
       }
     } on ApiException catch (e) {
-      // Revert on error (except 409 = already registered)
       if (e.statusCode != 409) {
         if (mounted) setState(() { isReg ? _registered.add(id) : _registered.remove(id); });
       }
@@ -73,42 +86,141 @@ class _EventsScreenState extends State<EventsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final featured = _events.isNotEmpty ? _events.first : null;
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        backgroundColor: brandNavy,
-        foregroundColor: Colors.white,
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CreateEventScreen()),
-          );
-          if (result == true) {
-            _load();
-          }
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Buat Acara', style: TextStyle(fontWeight: FontWeight.w600)),
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        floatingActionButton: FloatingActionButton.extended(
+          heroTag: null,
+          backgroundColor: brandNavy,
+          foregroundColor: Colors.white,
+          onPressed: () async {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CreateEventScreen()),
+            );
+            if (result == true) {
+              _load();
+              _loadMyEvents();
+            }
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Buat Acara', style: TextStyle(fontWeight: FontWeight.w600)),
+        ),
+        body: Column(
+          children: [
+            const TabBar(
+              labelColor: brandNavy,
+              unselectedLabelColor: dim2,
+              indicatorColor: brandNavy,
+              indicatorWeight: 3,
+              tabs: [
+                Tab(text: 'Semua Acara'),
+                Tab(text: 'Acara Saya'),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _buildAllEvents(),
+                  _buildMyEvents(),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        color: brandNavy,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
+    );
+  }
+
+  Widget _buildMyEvents() {
+    return RefreshIndicator(
+      onRefresh: _loadMyEvents,
+      color: brandNavy,
+      child: _loadingMyEvents
+        ? const Center(child: CircularProgressIndicator(color: brandNavy))
+        : _myEvents.isEmpty
+          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.event_busy, color: dim2, size: 40),
+              const SizedBox(height: 12),
+              Text('Kamu belum membuat acara', style: subTitle),
+            ]))
+          : ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+              itemCount: _myEvents.length,
+              itemBuilder: (context, index) {
+                final ev = _myEvents[index];
+                return GestureDetector(
+                  onTap: () async {
+                    final deleted = await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => ManageEventScreen(event: ev)),
+                    );
+                    if (deleted == true) {
+                      _load();
+                      _loadMyEvents();
+                    }
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: surface, borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 50, height: 50,
+                          decoration: BoxDecoration(
+                            color: brandBg, borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(_formatDate(ev['event_date']), style: statStyle.copyWith(fontSize: 18)),
+                              Text(_formatMonth(ev['event_date']), style: label.copyWith(color: brandNavy, fontSize: 10)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(ev['title'] ?? '', style: subTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 4),
+                              Text('${ev['attendee_count'] ?? 0} pendaftar', style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right, color: dim2),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildAllEvents() {
+    final featured = _events.isNotEmpty ? _events.first : null;
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: brandNavy,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         child: Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(22, 8, 22, 20),
+              padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${_events.length} acara aktif', style: caption),
                 Text('Acara & Kegiatan', style: heading),
               ]),
             ),
-            // Featured card
             if (featured != null)
               Container(
                 margin: const EdgeInsets.fromLTRB(22, 0, 22, 20),
@@ -157,7 +269,6 @@ class _EventsScreenState extends State<EventsScreen> {
                   ]),
                 ),
               ),
-            // Filters
             SizedBox(
               height: 44,
               child: ListView(
@@ -183,7 +294,6 @@ class _EventsScreenState extends State<EventsScreen> {
                 )).toList(),
               ),
             ),
-            // List
             if (_loading)
               const Center(child: Padding(
                 padding: EdgeInsets.all(40),
@@ -278,6 +388,6 @@ class _EventsScreenState extends State<EventsScreen> {
           ]),
         ),
       ),
-    ));
+    );
   }
 }
