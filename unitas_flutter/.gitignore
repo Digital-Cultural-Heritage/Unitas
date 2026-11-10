@@ -1,9 +1,88 @@
-# Miscellaneous
+# ── Flutter / Dart / Pub ──────────────────────────────────────────────────
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# ── Environment / Secrets ─────────────────────────────────────────────────
+# .env dikecualikan dari tracking — jangan commit kredensial & URL server
+.env
+.env.local
+.env.*.local
+
+# ── Android build artifacts ───────────────────────────────────────────────
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+/android/.gradle/
+/android/captures/
+/android/local.properties
+/android/app/.cxx/
+/android/key.properties
+*.jks
+*.keystore
+
+# ── NDK / CMake generated ─────────────────────────────────────────────────
+/android/app/src/main/cpp/.externalNativeBuild/
+**/.cxx/
+
+# ── iOS build artifacts ───────────────────────────────────────────────────
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# ── macOS build artifacts ─────────────────────────────────────────────────
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/macos/Flutter/ephemeral/
+
+# ── Windows build artifacts ───────────────────────────────────────────────
+**/windows/flutter/generated_plugin_registrant.cc
+**/windows/flutter/generated_plugin_registrant.h
+**/windows/flutter/generated_plugins.cmake
+
+# ── Linux build artifacts ─────────────────────────────────────────────────
+**/linux/flutter/generated_plugin_registrant.cc
+**/linux/flutter/generated_plugin_registrant.h
+**/linux/flutter/generated_plugins.cmake
+
+# ── Symbolication / Obfuscation ───────────────────────────────────────────
+app.*.symbols
+app.*.map.json
+
+# ── IntelliJ / Android Studio ─────────────────────────────────────────────
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# ── VS Code ───────────────────────────────────────────────────────────────
+# .vscode dikomentar — boleh di-track jika tim share launch config
+#.vscode/
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Misc ──────────────────────────────────────────────────────────────────
 *.class
 *.log
 *.pyc
 *.swp
-.DS_Store
 .atom/
 .build/
 .buildlog/
@@ -11,38 +90,4 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# Widget Preview related
 .widget_preview/

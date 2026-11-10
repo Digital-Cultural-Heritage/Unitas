@@ -1,5 +1,40 @@
-﻿node_modules/
+# ── Node.js ───────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# ── Environment / Secrets ─────────────────────────────────────────────────
 .env
 .env.local
-*.log
+.env.*.local
+.env.production
+
+# ── Build output ──────────────────────────────────────────────────────────
+dist/
+build/
+out/
+
+# ── Vercel ────────────────────────────────────────────────────────────────
 .vercel/
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Upload / temp files ───────────────────────────────────────────────────
+uploads/
+tmp/
+temp/
+
+# ── Sharp / native addons ─────────────────────────────────────────────────
+*.node
