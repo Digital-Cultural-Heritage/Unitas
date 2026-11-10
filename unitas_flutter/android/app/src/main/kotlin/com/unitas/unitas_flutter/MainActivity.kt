@@ -22,8 +22,6 @@ class MainActivity : FlutterActivity() {
                 MethodChannel(messenger, SECURITY_CHANNEL)
                     .invokeMethod("onDebuggerDetected", null)
             }
-            // Hard kill sebagai fallback jika Flutter layer sudah ter-bypass
-            Process.killProcess(Process.myPid())
         }
     }
 
