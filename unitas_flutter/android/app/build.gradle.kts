@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.unitas.unitas_flutter"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -15,25 +15,51 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.unitas.unitas_flutter"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // ── NDK / CMake config ─────────────────────────────────────────────
+        externalNativeBuild {
+            cmake {
+                // Flags passed through to CMakeLists.txt
+                cppFlags += listOf("-std=c++17", "-fno-rtti", "-fno-exceptions")
+                // Target ABI list
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
+        }
+
+        ndk {
+            // Mirror the ABI list above so packaging is consistent
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // ── Point Gradle to our CMakeLists.txt ────────────────────────────────
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // TODO: Replace with your own signing config for production releases.
             signingConfig = signingConfigs.getByName("debug")
+
+            // Strip debug symbols from .so files in release builds
+            ndk {
+                debugSymbolLevel = "NONE"
+            }
+        }
+        debug {
+            // Keep symbols in debug for easier native debugging
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
     }
 }

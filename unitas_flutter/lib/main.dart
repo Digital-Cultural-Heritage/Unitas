@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'core/theme/colors.dart';
 import 'core/api/auth_service.dart';
+import 'core/security/security_service.dart';
+import 'core/security/security_block_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/directory_screen.dart';
@@ -12,14 +14,54 @@ import 'screens/profile_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
-  // Synchronous — jangan panggil plugin apapun di sini
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
   ));
+
+  // ── Security Gate: Root Detection ─────────────────────────────────────
+  // Harus dilakukan SEBELUM runApp agar tidak ada widget yang dirender jika
+  // perangkat terdeteksi root.
+  final isRooted = await SecurityService.isRooted();
+
+  if (isRooted) {
+    runApp(const _SecurityBlockApp(
+      message:
+          'Perangkat terdeteksi menggunakan akses root.\n\n'
+          'Aplikasi Unitas tidak dapat digunakan pada perangkat yang telah '
+          'dimodifikasi untuk alasan keamanan data alumni.',
+    ));
+    return; // Hentikan eksekusi — jangan lanjutkan ke UnitasApp
+  }
+
+  // ── Security Gate: Anti-Debug Threat Listener ─────────────────────────
+  // Native anti-debug sudah dimulai di MainActivity.onCreate().
+  // Di sini kita pasang listener jika native mendeteksi debugger lain
+  // yang berhasil attach setelah app berjalan.
+  SecurityService.listenForThreats((reason) {
+    // Ganti seluruh app dengan halaman block
+    runApp(_SecurityBlockApp(message: reason));
+  });
+
   runApp(const UnitasApp());
+}
+
+// ── Security Block App ─────────────────────────────────────────────────────
+class _SecurityBlockApp extends StatelessWidget {
+  final String message;
+  const _SecurityBlockApp({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Unitas',
+      home: SecurityBlockScreen(message: message),
+    );
+  }
 }
 
 class UnitasApp extends StatefulWidget {
