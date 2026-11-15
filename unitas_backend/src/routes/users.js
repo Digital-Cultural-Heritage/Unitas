@@ -2,6 +2,7 @@ const express = require("express");
 const { body, query, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { verifyAccessToken } = require("../lib/jwt");
 
 const router = express.Router();
 
@@ -66,7 +67,36 @@ router.get("/", async (req, res, next) => {
     const { data, count, error } = await dbQuery;
     if (error) throw error;
 
-    res.json({ data, total: count, page: Number(page), limit: Number(limit) });
+    let statusMap = {};
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ") && data && data.length > 0) {
+      try {
+        const decoded = verifyAccessToken(authHeader.split(" ")[1]);
+        const currentUserId = decoded.userId;
+        const { data: conns } = await supabase
+          .from("alumni_connections")
+          .select("requester_id, addressee_id, status")
+          .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`);
+
+        if (conns) {
+          for (const c of conns) {
+            const otherId = c.requester_id === currentUserId ? c.addressee_id : c.requester_id;
+            if (c.status === "accepted") {
+              statusMap[otherId] = "accepted";
+            } else if (c.status === "pending") {
+              statusMap[otherId] = c.requester_id === currentUserId ? "pending" : "incoming";
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    const enriched = (data || []).map((row) => ({
+      ...row,
+      connection_status: statusMap[row.user_id] || "none",
+    }));
+
+    res.json({ data: enriched, total: count, page: Number(page), limit: Number(limit) });
   } catch (err) {
     next(err);
   }
@@ -108,7 +138,14 @@ router.post("/:id/connect", requireAuth, async (req, res, next) => {
       .single();
 
     if (existing) {
-      if (existing.status === "accepted") return res.json({ message: "Sudah terhubung" });
+      if (existing.status === "accepted") {
+        return res.json({ message: "Sudah terhubung", connection: existing });
+      }
+
+      // Jika pengirim yang sama menekan lagi, jangan auto-accept permintaan sendiri
+      if (existing.status === "pending" && existing.requester_id === requesterId) {
+        return res.json({ message: "Permintaan koneksi sudah dikirim", connection: existing });
+      }
 
       // Setujui jika ada pending dari sisi lain
       if (existing.status === "pending") {

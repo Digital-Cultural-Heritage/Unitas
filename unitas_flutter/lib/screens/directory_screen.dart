@@ -20,6 +20,8 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   bool _loading = true;
   String? _error;
   String? _currentUserId;
+  final Map<String, String> _connectionStatus = {};
+  final Set<String> _connectingIds = {};
 
   final List<String> _filters = ['Semua', 'Terhubung', 'Jakarta', 'Lainnya'];
 
@@ -53,7 +55,18 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
         _currentUserId = profile['user_id']?.toString() ?? profile['id']?.toString();
       } catch (_) {}
 
-      if (mounted) setState(() { _alumni = data; _loading = false; });
+      if (mounted) {
+        setState(() {
+          _alumni = data;
+          for (final a in data) {
+            final uid = a['user_id']?.toString() ?? '';
+            if (uid.isNotEmpty) {
+              _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
+            }
+          }
+          _loading = false;
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() { _error = e.message; _loading = false; });
     } catch (_) {
@@ -76,24 +89,49 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   }
 
   Future<void> _connect(String userId) async {
+    if (_connectingIds.contains(userId)) return;
+    final currentStatus = _connectionStatus[userId] ?? 'none';
+    if (currentStatus == 'accepted' || currentStatus == 'pending') return;
+
+    setState(() => _connectingIds.add(userId));
     final messenger = ScaffoldMessenger.of(context);
     try {
       final res = await UsersService.connect(userId);
       if (!mounted) return;
+      final serverStatus = res['connection']?['status']?.toString();
+      final msg = (res['message'] ?? '').toString();
+      final nextStatus = (serverStatus == 'accepted' ||
+              msg == 'Sudah terhubung' ||
+              msg == 'Koneksi diterima')
+          ? 'accepted'
+          : 'pending';
+      setState(() => _connectionStatus[userId] = nextStatus);
       messenger.showSnackBar(
-        SnackBar(content: Text(res['message'] ?? 'Permintaan koneksi dikirim')),
+        SnackBar(
+          content: Text(msg.isNotEmpty ? msg : 'Permintaan koneksi dikirim'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     } catch (_) {
       if (!mounted) return;
       messenger.showSnackBar(
-        const SnackBar(content: Text('Gagal mengirim permintaan koneksi')),
+        const SnackBar(
+          content: Text('Gagal mengirim permintaan koneksi'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
+    } finally {
+      if (mounted) setState(() => _connectingIds.remove(userId));
     }
   }
 
   void _showAlumniDetail(Map<String, dynamic> p, Color avatarColor, bool isMe) {
     final userId = p['user_id']?.toString() ?? '';
-    final isOnline = p['is_online'] == true;
+    final connStatus = _connectionStatus[userId] ?? 'none';
+    final isConnecting = _connectingIds.contains(userId);
+    final isConnected = connStatus == 'accepted';
+    final isPending = connStatus == 'pending';
+    final isIncoming = connStatus == 'incoming';
     final prodi = (p['prodi'] ?? '').toString();
     final angkatan = (p['angkatan'] ?? '').toString();
     final jobLine = '${p['pekerjaan'] ?? ''} · ${p['perusahaan'] ?? ''}'
@@ -194,20 +232,130 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                 height: 46,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isOnline ? surface : brandNavy,
-                    foregroundColor: isOnline ? dim1 : Colors.white,
+                    backgroundColor: (isConnected || isPending) ? surface : brandNavy,
+                    foregroundColor: isConnected
+                        ? brandGreen
+                        : (isPending ? dim1 : Colors.white),
+                    disabledBackgroundColor: surface,
+                    disabledForegroundColor: isConnected ? brandGreen : dim1,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _connect(userId);
-                  },
-                  icon: Icon(isOnline ? Icons.check_circle_outline : Icons.person_add_outlined, size: 18),
-                  label: Text(isOnline ? 'Sudah Terhubung' : 'Hubungi Alumni'),
+                  onPressed: (isConnected || isPending || isConnecting)
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _connect(userId);
+                        },
+                  icon: Icon(
+                    isConnected
+                        ? Icons.check_circle_outline
+                        : (isPending
+                            ? Icons.schedule_outlined
+                            : (isIncoming ? Icons.how_to_reg_outlined : Icons.person_add_outlined)),
+                    size: 18,
+                  ),
+                  label: Text(
+                    isConnected
+                        ? 'Sudah Terhubung'
+                        : (isPending
+                            ? 'Permintaan Terkirim'
+                            : (isIncoming ? 'Terima Permintaan Koneksi' : 'Hubungi Alumni')),
+                  ),
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConnectButton(String userId) {
+    final isConnecting = _connectingIds.contains(userId);
+    final status = _connectionStatus[userId] ?? 'none';
+
+    if (isConnecting) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        decoration: BoxDecoration(
+          color: card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: borderColor),
+        ),
+        child: const SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(strokeWidth: 2, color: brandNavy),
+        ),
+      );
+    }
+
+    if (status == 'accepted') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: brandGreen.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: brandGreen.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle_outline, size: 14, color: brandGreen),
+            const SizedBox(width: 4),
+            Text(
+              'Terhubung',
+              style: caption.copyWith(color: brandGreen, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (status == 'pending') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.schedule_outlined, size: 14, color: dim1),
+            const SizedBox(width: 4),
+            Text(
+              'Terkirim',
+              style: caption.copyWith(color: dim1, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final isIncoming = status == 'incoming';
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        backgroundColor: isIncoming ? brandGold : brandNavy,
+        foregroundColor: isIncoming ? brandNavy : Colors.white,
+        side: BorderSide(color: isIncoming ? brandGold : brandNavy),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () => _connect(userId),
+      icon: Icon(
+        isIncoming ? Icons.how_to_reg_outlined : Icons.person_add_outlined,
+        size: 14,
+        color: isIncoming ? brandNavy : Colors.white,
+      ),
+      label: Text(
+        isIncoming ? 'Terima' : 'Hubungi',
+        style: caption.copyWith(
+          color: isIncoming ? brandNavy : Colors.white,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -407,29 +555,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                               child: Text('Kamu', style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600)),
                             )
                           else
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: isOnline ? Colors.transparent : brandNavy,
-                                foregroundColor: isOnline ? dim1 : Colors.white,
-                                side: BorderSide(color: isOnline ? borderColor : brandNavy),
-                                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              onPressed: () => _connect(userId),
-                              icon: Icon(
-                                isOnline ? Icons.check : Icons.person_add_outlined,
-                                size: 14,
-                                color: isOnline ? dim1 : Colors.white,
-                              ),
-                              label: Text(
-                                isOnline ? 'Terhubung' : 'Hubungi',
-                                style: caption.copyWith(
-                                  color: isOnline ? dim1 : Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
+                            _buildConnectButton(userId),
                         ]),
                       ),
                     ),

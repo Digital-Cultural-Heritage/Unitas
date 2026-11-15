@@ -13,7 +13,7 @@ class UsersService {
     if (kota != null && kota != 'Semua') params.write('&kota=${Uri.encodeComponent(kota)}');
     if (isOnline == true) params.write('&is_online=true');
 
-    final res = await ApiClient.get(params.toString(), auth: false);
+    final res = await ApiClient.get(params.toString(), auth: true);
     final list = res['data'] as List? ?? [];
     return list.map((e) => Map<String, dynamic>.from(e)).toList();
   }
