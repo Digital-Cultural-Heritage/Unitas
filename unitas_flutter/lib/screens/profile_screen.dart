@@ -127,186 +127,319 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Cover
-        Stack(children: [
-          SizedBox(
-            height: 120, width: double.infinity,
-            child: Image.network(
-              'https://images.unsplash.com/photo-1748144679532-c36d9d5584e6?w=600&h=240&fit=crop',
-              fit: BoxFit.cover,
-              color: Colors.black54,
-              colorBlendMode: BlendMode.darken,
-            ),
-          ),
-          Positioned.fill(child: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                colors: [Colors.transparent, brandBg], stops: [0.5, 1.0],
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Cover
+            Stack(children: [
+              SizedBox(
+                height: 128, width: double.infinity,
+                child: Image.network(
+                  'https://images.unsplash.com/photo-1748144679532-c36d9d5584e6?w=600&h=240&fit=crop',
+                  fit: BoxFit.cover,
+                  color: Colors.black54,
+                  colorBlendMode: BlendMode.darken,
+                ),
               ),
-            ),
-          )),
-        ]),
-        // Profile section
-        Padding(
-          padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-          child: Transform.translate(
-            offset: const Offset(0, -42),
-            child: _loading
-              ? const ProfileSkeleton()
-              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    // Avatar
-                    _profile?['avatar_url'] != null && _profile!['avatar_url'].toString().isNotEmpty
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: Image.network(
-                            '${_profile!['avatar_url']}?v=$_avatarVersion',
-                            width: 70, height: 70, fit: BoxFit.cover,
-                            gaplessPlayback: true,
-                            errorBuilder: (_, _, _) => Container(
-                              width: 70, height: 70,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF7A4B2B),
-                                borderRadius: BorderRadius.circular(18),
-                                border: Border.all(color: brandBg, width: 2),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
-                            ),
-                          ),
-                        )
-                      : Container(
-                          width: 70, height: 70,
+              Positioned.fill(child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, brandBg], stops: [0.45, 1.0],
+                  ),
+                ),
+              )),
+              Positioned(
+                top: 12,
+                right: 14,
+                child: SafeArea(
+                  bottom: false,
+                  child: InkWell(
+                    onTap: _openEditProfile,
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 16),
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+            // Profile section
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
+              child: Transform.translate(
+                offset: const Offset(0, -42),
+                child: _loading
+                  ? const ProfileSkeleton()
+                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        // Avatar dengan frame & bayangan lembut
+                        Container(
+                          width: 76,
+                          height: 76,
                           decoration: BoxDecoration(
                             color: const Color(0xFF7A4B2B),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: brandBg, width: 2),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: brandBg, width: 3),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x181E3A5F),
+                                blurRadius: 10,
+                                offset: Offset(0, 4),
+                              ),
+                            ],
                           ),
-                          alignment: Alignment.center,
-                          child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(17),
+                            child: _profile?['avatar_url'] != null && _profile!['avatar_url'].toString().isNotEmpty
+                                ? Image.network(
+                                    '${_profile!['avatar_url']}?v=$_avatarVersion',
+                                    width: 70, height: 70, fit: BoxFit.cover,
+                                    gaplessPlayback: true,
+                                    errorBuilder: (_, _, _) => Center(
+                                      child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
+                                    ),
+                                  )
+                                : Center(
+                                    child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
+                                  ),
+                          ),
                         ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: brandNavy,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        elevation: 1,
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: brandNavy,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            elevation: 1,
+                          ),
+                          onPressed: _openEditProfile,
+                          icon: const Icon(Icons.edit_outlined, size: 15),
+                          label: Text('Edit Profil', style: buttonStyle.copyWith(fontSize: 12.5)),
+                        ),
+                      ]),
+                      const SizedBox(height: 14),
+                      Text(_profile?['full_name'] ?? '—', style: heading),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.school_outlined, size: 15, color: dim1),
+                              const SizedBox(width: 5),
+                              Text(
+                                '${_profile?['prodi'] ?? 'Alumni'}',
+                                style: body.copyWith(color: dim1, fontWeight: FontWeight.w500),
+                              ),
+                            ],
+                          ),
+                          if ((_profile?['angkatan'] ?? '').toString().isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: borderColor),
+                              ),
+                              child: Text(
+                                'Angkatan ${_profile!['angkatan']}',
+                                style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600, fontSize: 11),
+                              ),
+                            ),
+                        ],
                       ),
-                      onPressed: () async {
-                        if (_profile == null) return;
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => EditProfileScreen(initialProfile: _profile!),
+                      if ((_profile?['pekerjaan'] ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          '${_profile!['pekerjaan']} · ${_profile!['perusahaan'] ?? ''} · ${_profile!['kota'] ?? ''}',
+                          style: body.copyWith(color: dim2),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      // Stats
+                      Row(children: [
+                        {'val': '${_profile?['points'] ?? 0}', 'label': 'Poin', 'icon': Icons.stars_outlined, 'tap': false},
+                        {'val': '${_connections.length}', 'label': 'Koneksi', 'icon': Icons.people_outline, 'tap': true},
+                        {'val': '${_profile?['events_count'] ?? 0}', 'label': 'Acara', 'icon': Icons.event_available_outlined, 'tap': false},
+                      ].asMap().entries.map((e) {
+                        final i = e.key; final s = e.value;
+                        final canTap = s['tap'] == true;
+                        return Expanded(
+                          child: InkWell(
+                            onTap: canTap ? () => setState(() => _tab = 'koneksi') : null,
+                            borderRadius: BorderRadius.horizontal(
+                              left: i == 0 ? const Radius.circular(12) : Radius.zero,
+                              right: i == 2 ? const Radius.circular(12) : Radius.zero,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                border: Border(
+                                  top: BorderSide(color: borderColor), bottom: BorderSide(color: borderColor),
+                                  left: BorderSide(color: borderColor),
+                                  right: i == 2 ? BorderSide(color: borderColor) : BorderSide.none,
+                                ),
+                                borderRadius: BorderRadius.horizontal(
+                                  left: i == 0 ? const Radius.circular(12) : Radius.zero,
+                                  right: i == 2 ? const Radius.circular(12) : Radius.zero,
+                                ),
+                              ),
+                              child: Column(children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(s['icon'] as IconData, size: 15, color: brandGold),
+                                    const SizedBox(width: 4),
+                                    Text(s['val'] as String, style: statStyle.copyWith(fontSize: 19, color: brandNavy)),
+                                  ],
+                                ),
+                                const SizedBox(height: 3),
+                                Text(s['label'] as String, style: caption),
+                              ]),
+                            ),
                           ),
                         );
-                        if (result == true) {
-                          _avatarVersion = DateTime.now().millisecondsSinceEpoch;
-                          _load();
-                        }
-                      },
-                      icon: const Icon(Icons.edit_outlined, size: 15),
-                      label: Text('Edit Profil', style: buttonStyle.copyWith(fontSize: 12.5)),
-                    ),
-                  ]),
-                  const SizedBox(height: 14),
-                  Text(_profile?['full_name'] ?? '—', style: heading),
-                  const SizedBox(height: 3),
-                  Text('${_profile?['prodi'] ?? ''} · Angkatan ${_profile?['angkatan'] ?? ''}',
-                    style: body.copyWith(color: dim2)),
-                  if ((_profile?['pekerjaan'] ?? '').isNotEmpty)
-                    Text('${_profile!['pekerjaan']} · ${_profile!['perusahaan'] ?? ''} · ${_profile!['kota'] ?? ''}',
-                      style: body.copyWith(color: dim2)),
-                  const SizedBox(height: 18),
-                  // Stats
-                  Row(children: [
-                    {'val': '${_profile?['points'] ?? 0}', 'label': 'Poin'},
-                    {'val': '${_connections.length}', 'label': 'Koneksi'},
-                    {'val': '—', 'label': 'Acara'},
-                  ].asMap().entries.map((e) {
-                    final i = e.key; final s = e.value;
-                    return Expanded(child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: surface,
-                        border: Border(
-                          top: BorderSide(color: borderColor), bottom: BorderSide(color: borderColor),
-                          left: BorderSide(color: borderColor),
-                          right: i < 2 ? BorderSide(color: borderColor) : BorderSide.none,
-                        ),
-                        borderRadius: BorderRadius.horizontal(
-                          left: i == 0 ? const Radius.circular(10) : Radius.zero,
-                          right: i == 2 ? const Radius.circular(10) : Radius.zero,
-                        ),
-                      ),
-                      child: Column(children: [
-                        Text(s['val']!, style: statStyle.copyWith(fontSize: 20, color: brandNavy)),
-                        const SizedBox(height: 2),
-                        Text(s['label']!, style: caption),
-                      ]),
-                    ));
-                  }).toList()),
-                  const SizedBox(height: 20),
-                  // Tabs
-                  Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
-                    Expanded(child: GestureDetector(
-                      onTap: () => setState(() => _tab = t),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        decoration: BoxDecoration(
-                          border: Border(bottom: BorderSide(
-                            color: _tab == t ? brandNavy : Colors.transparent, width: 1.5,
-                          )),
-                        ),
-                        child: Text(
-                          '${t[0].toUpperCase()}${t.substring(1)}' + (t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : ''),
-                          style: caption.copyWith(
-                            color: _tab == t ? brandNavy : dim2,
-                            fontWeight: _tab == t ? FontWeight.w600 : FontWeight.w400,
+                      }).toList()),
+                      const SizedBox(height: 20),
+                      // Tabs
+                      Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
+                        Expanded(child: GestureDetector(
+                          onTap: () => setState(() => _tab = t),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              border: Border(bottom: BorderSide(
+                                color: _tab == t ? brandNavy : Colors.transparent, width: 1.5,
+                              )),
+                            ),
+                            child: Text(
+                              '${t[0].toUpperCase()}${t.substring(1)}${t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : ''}',
+                              style: caption.copyWith(
+                                color: _tab == t ? brandNavy : dim2,
+                                fontWeight: _tab == t ? FontWeight.w600 : FontWeight.w400,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    )),
-                  ).toList()),
-                  const SizedBox(height: 20),
-                  if (_tab == 'tentang') _buildTentang(),
-                  if (_tab == 'koneksi') _buildKoneksi(),
-                  if (_tab == 'pengaturan') _buildPengaturan(),
-                ]),
-          ),
+                        )),
+                      ).toList()),
+                      const SizedBox(height: 20),
+                      if (_tab == 'tentang') _buildTentang(),
+                      if (_tab == 'koneksi') _buildKoneksi(),
+                      if (_tab == 'pengaturan') _buildPengaturan(),
+                    ]),
+              ),
+            ),
+          ]),
         ),
-      ]),
+      ),
     );
   }
 
   Widget _buildTentang() {
+    final bio = (_profile?['bio'] ?? '').toString().trim();
+    final linkedin = (_profile?['linkedin'] ?? '').toString().trim();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Tentang Saya', style: label),
-      const SizedBox(height: 8),
-      Text(
-        (_profile?['bio'] ?? '').isNotEmpty
-          ? _profile!['bio']
-          : 'Belum ada bio. Tambahkan bio kamu di Edit Profil.',
-        style: body.copyWith(height: 1.65, color: (_profile?['bio'] ?? '').isEmpty ? dim2 : textPrimary),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.person_outline, size: 16, color: brandNavy),
+                    const SizedBox(width: 6),
+                    Text('Tentang Saya', style: label),
+                  ],
+                ),
+                if (bio.isEmpty)
+                  InkWell(
+                    onTap: _openEditProfile,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text(
+                        '+ Tambah Bio',
+                        style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              bio.isNotEmpty ? bio : 'Ceritakan sedikit tentang pengalaman, minat, atau kegiatanmu saat ini.',
+              style: body.copyWith(
+                height: 1.55,
+                color: bio.isNotEmpty ? textPrimary : dim2,
+              ),
+            ),
+          ],
+        ),
       ),
-      const SizedBox(height: 16),
-      const Divider(color: Color(0x1A1E3A5F)),
-      const SizedBox(height: 16),
-      Text('Email', style: label),
-      const SizedBox(height: 8),
-      Text(_profile?['email'] ?? '—', style: body),
-      if ((_profile?['linkedin'] ?? '').isNotEmpty) ...[
-        const SizedBox(height: 12),
-        Text('LinkedIn', style: label),
-        const SizedBox(height: 8),
-        Text(_profile!['linkedin'], style: body.copyWith(color: brandNavy)),
-      ],
+      const SizedBox(height: 12),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Informasi Kontak', style: label),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.email_outlined, size: 17, color: dim1),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(_profile?['email'] ?? '—', style: body),
+                ),
+              ],
+            ),
+            if (linkedin.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Divider(color: borderColor, height: 1),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(Icons.link, size: 17, color: brandNavy),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(linkedin, style: body.copyWith(color: brandNavy)),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
     ]);
   }
 
