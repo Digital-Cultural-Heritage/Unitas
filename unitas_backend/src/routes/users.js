@@ -15,7 +15,8 @@ router.get("/me", requireAuth, async (req, res, next) => {
       .single();
     if (error) throw error;
 
-    const profile = data.user_profiles?.[0] || {};
+    const rawProfile = data.user_profiles;
+    const profile = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) || {};
     res.json({ id: data.id, email: data.email, role: data.role, ...profile });
   } catch (err) {
     next(err);

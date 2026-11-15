@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -53,11 +54,16 @@ class _UnitasAppState extends State<UnitasApp> {
     return MaterialApp(
       title: 'Unitas',
       debugShowCheckedModeBanner: false,
+      scrollBehavior: const _UnitasScrollBehavior(),
       theme: ThemeData(
         colorScheme: ColorScheme.light(
           primary: brandNavy,
           secondary: brandGold,
           surface: brandBg,
+        ),
+        appBarTheme: const AppBarTheme(
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
         ),
         textTheme: GoogleFonts.outfitTextTheme(),
         scaffoldBackgroundColor: brandBg,
@@ -78,14 +84,57 @@ class _SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       backgroundColor: brandBg,
       body: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          CircularProgressIndicator(color: brandNavy, strokeWidth: 2),
-          SizedBox(height: 20),
-          Text('Memuat…', style: TextStyle(color: Color(0x991E3A5F), fontSize: 13)),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: brandNavy,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                'U',
+                style: GoogleFonts.outfit(
+                  color: brandGold,
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Unitas',
+              style: GoogleFonts.outfit(
+                color: brandNavy,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Menyiapkan ruang alumni…',
+              style: TextStyle(color: dim1, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: 140,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: const LinearProgressIndicator(
+                  minHeight: 3,
+                  color: brandNavy,
+                  backgroundColor: dim3,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -102,20 +151,14 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
+  int _homeRefreshTick = 0;
 
-  late final List<Widget> _screens;
-
-  @override
-  void initState() {
-    super.initState();
-    _screens = [
-      const HomeScreen(),
-      const DirectoryScreen(),
-      const EventsScreen(),
-      const JobsScreen(),
-      ProfileScreen(onLogout: widget.onLogout),
-    ];
-  }
+  late final List<Widget> _otherScreens = [
+    const DirectoryScreen(),
+    const EventsScreen(),
+    const JobsScreen(),
+    ProfileScreen(onLogout: widget.onLogout),
+  ];
 
   final List<_NavItem> _navItems = const [
     _NavItem(icon: Icons.home_outlined,           activeIcon: Icons.home,           label: 'Beranda'),
@@ -131,7 +174,14 @@ class _MainShellState extends State<MainShell> {
       backgroundColor: brandBg,
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: [
+          HomeScreen(
+            refreshTrigger: _homeRefreshTick,
+            onOpenDirectory: () => setState(() => _currentIndex = 1),
+            onOpenEvents: () => setState(() => _currentIndex = 2),
+          ),
+          ..._otherScreens,
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
@@ -147,7 +197,12 @@ class _MainShellState extends State<MainShell> {
                 final i = e.key; final item = e.value;
                 final isActive = i == _currentIndex;
                 return GestureDetector(
-                  onTap: () => setState(() => _currentIndex = i),
+                  onTap: () => setState(() {
+                    if (i == 0 && _currentIndex != 0) {
+                      _homeRefreshTick++;
+                    }
+                    _currentIndex = i;
+                  }),
                   behavior: HitTestBehavior.opaque,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
@@ -184,4 +239,31 @@ class _NavItem {
   final IconData activeIcon;
   final String label;
   const _NavItem({required this.icon, required this.activeIcon, required this.label});
+}
+
+class _UnitasScrollBehavior extends MaterialScrollBehavior {
+  const _UnitasScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    // Nonaktifkan StretchingOverscrollIndicator (Material 3) yang sering memicu flicker putih saat scroll di Web
+    return child;
+  }
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const ClampingScrollPhysics();
+  }
 }

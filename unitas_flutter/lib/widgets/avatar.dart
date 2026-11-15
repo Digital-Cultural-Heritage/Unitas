@@ -5,16 +5,17 @@ class UnitasAvatar extends StatelessWidget {
   final String initials;
   final Color color;
   final double size;
+  final String? avatarUrl;
 
   const UnitasAvatar({
     super.key,
     required this.initials,
     required this.color,
     this.size = 42,
+    this.avatarUrl,
   });
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _fallback() {
     return Container(
       width: size,
       height: size,
@@ -29,5 +30,23 @@ class UnitasAvatar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = avatarUrl?.trim();
+    if (url != null && url.isNotEmpty) {
+      return ClipOval(
+        child: Image.network(
+          url,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => _fallback(),
+        ),
+      );
+    }
+    return _fallback();
   }
 }

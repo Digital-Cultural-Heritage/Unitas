@@ -4,6 +4,7 @@ import '../core/theme/text_styles.dart';
 import '../core/api/users_service.dart';
 import '../core/api/api_client.dart';
 import '../widgets/avatar.dart';
+import '../widgets/skeleton.dart';
 
 class DirectoryScreen extends StatefulWidget {
   const DirectoryScreen({super.key});
@@ -69,18 +70,27 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 8, 22, 20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${_alumni.isNotEmpty ? _alumni.length.toString() : "—"} alumni ditemukan', style: caption),
-              Text('Direktori Alumni', style: heading),
-            ]),
-          ),
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: RefreshIndicator(
+            onRefresh: _load,
+            color: brandNavy,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${_alumni.isNotEmpty ? _alumni.length.toString() : "—"} alumni ditemukan', style: caption),
+                      Text('Direktori Alumni', style: heading),
+                    ]),
+                  ),
           // Search
           Container(
             margin: const EdgeInsets.fromLTRB(22, 0, 22, 16),
@@ -102,15 +112,16 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
           ),
           // Filters
           SizedBox(
-            height: 44,
+            height: 36,
             child: ListView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(22, 0, 22, 20),
+              padding: const EdgeInsets.symmetric(horizontal: 22),
               children: _filters.map((f) => Padding(
-                padding: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.only(right: 8),
                 child: GestureDetector(
                   onTap: () { setState(() => _filter = f); _load(); },
                   child: Container(
+                    alignment: Alignment.center,
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     decoration: BoxDecoration(
                       color: _filter == f ? brandNavy : Colors.transparent,
@@ -118,7 +129,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                       border: Border.all(color: _filter == f ? brandNavy : borderColor),
                     ),
                     child: Text(f, style: caption.copyWith(
-                      color: _filter == f ? Colors.white : dim2,
+                      color: _filter == f ? Colors.white : dim1,
                       fontWeight: _filter == f ? FontWeight.w600 : FontWeight.w400,
                     )),
                   ),
@@ -126,25 +137,39 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
               )).toList(),
             ),
           ),
+          const SizedBox(height: 16),
           // Content
           if (_loading)
-            const Center(child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(color: brandNavy),
-            ))
+            const DirectorySkeletonList()
           else if (_error != null)
             Padding(
               padding: const EdgeInsets.all(22),
               child: Text(_error!, style: caption.copyWith(color: dim2)),
             )
           else if (_alumni.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(40),
-              child: Center(child: Column(children: [
-                const Icon(Icons.people_outline, color: Color(0x611E3A5F), size: 40),
-                const SizedBox(height: 12),
-                Text('Tidak ada alumni ditemukan', style: subTitle),
-              ])),
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: borderColor),
+              ),
+              child: Column(children: [
+                Container(
+                  width: 60, height: 60,
+                  decoration: BoxDecoration(
+                    color: brandGold.withValues(alpha: 0.16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.people_outline, color: brandNavy, size: 28),
+                ),
+                const SizedBox(height: 14),
+                Text('Tidak ada alumni ditemukan', style: subTitle.copyWith(fontSize: 16)),
+                const SizedBox(height: 4),
+                Text('Coba ubah kata kunci pencarian atau filter kota.', style: caption, textAlign: TextAlign.center),
+              ]),
             )
           else
             Padding(
@@ -161,7 +186,11 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       child: Row(children: [
-                        UnitasAvatar(initials: _initials(p), color: _colorFor(i)),
+                        UnitasAvatar(
+                          initials: _initials(p),
+                          color: _colorFor(i),
+                          avatarUrl: p['avatar_url']?.toString(),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Row(children: [
@@ -227,6 +256,10 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
               ),
             ),
         ]),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
