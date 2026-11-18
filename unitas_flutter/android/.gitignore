@@ -12,3 +12,5 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+# Team-shared debug keystore (safe, Android debug key only — never share release keys)
+!app/debug.keystore

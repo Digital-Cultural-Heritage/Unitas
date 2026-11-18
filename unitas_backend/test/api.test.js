@@ -470,7 +470,7 @@ describe("Unitas Backend API", () => {
       assert.equal(emptyRes.status, 400);
 
       // 503 when GOOGLE_CLIENT_ID missing
-      delete process.env.GOOGLE_CLIENT_ID;
+      process.env.GOOGLE_CLIENT_ID = "";
       delete process.env.GOOGLE_SERVER_CLIENT_IDS;
       const unconfiguredRes = await request("POST", "/api/auth/google", { id_token: "tok" });
       assert.equal(unconfiguredRes.status, 503);

@@ -8,6 +8,8 @@ const String _envGoogleServerClientId =
     String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
 
 class AuthService {
+  static const String _defaultGoogleServerClientId =
+      '900620974472-q2n23p2jtahugolc13a51ma0plo2pi1n.apps.googleusercontent.com';
   static Future<void>? _googleInit;
 
   static String? get googleServerClientId {
@@ -16,7 +18,7 @@ class AuthService {
       final v = dotenv.env['GOOGLE_SERVER_CLIENT_ID']?.trim();
       if (v != null && v.isNotEmpty) return v;
     } catch (_) {}
-    return null;
+    return _defaultGoogleServerClientId;
   }
 
   static Future<void> _ensureGoogleInitialized() {

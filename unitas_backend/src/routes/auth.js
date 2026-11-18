@@ -75,15 +75,30 @@ function safeEqual(a, b) {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
+function isMissingColumn(err, col) {
+  return Boolean(
+    err &&
+      (err.code === "42703" ||
+        err.code === "PGRST204" ||
+        (typeof err.message === "string" && err.message.includes(col)))
+  );
+}
+
 // Buat access+refresh token & simpan refresh token (1 query). `extra` = kolom tambahan yang ikut di-update.
 async function startSession(user, extra = {}) {
   const payload = tokenPayload(user);
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
-  const { error } = await supabase
+  let { error } = await supabase
     .from("users")
     .update({ refresh_token: refreshToken, ...extra })
     .eq("id", user.id);
+  if (error && Object.keys(extra).length > 0 && isMissingColumn(error, "google_sub")) {
+    ({ error } = await supabase
+      .from("users")
+      .update({ refresh_token: refreshToken })
+      .eq("id", user.id));
+  }
   if (error) throw error;
   return { accessToken, refreshToken };
 }
@@ -234,6 +249,8 @@ router.get("/me", requireAuth, async (req, res, next) => {
 
 // ── POST /api/auth/google ─────────────────────────────────────────────────
 // Body: { "id_token": "<Google ID token>" } -> respons identik dengan /login
+const DEFAULT_GOOGLE_CLIENT_ID =
+  "900620974472-q2n23p2jtahugolc13a51ma0plo2pi1n.apps.googleusercontent.com";
 let _googleClient;
 function googleAudiences() {
   const raw = [
@@ -246,6 +263,9 @@ function googleAudiences() {
     .flatMap((v) => String(v).split(","))
     .map((s) => s.trim())
     .filter(Boolean);
+  if (raw.length === 0 && process.env.GOOGLE_CLIENT_ID !== "") {
+    return [DEFAULT_GOOGLE_CLIENT_ID];
+  }
   return [...new Set(raw)];
 }
 
@@ -260,9 +280,15 @@ async function verifyGoogleIdToken(idToken, audience) {
 }
 
 const USER_COLS = "id, email, role, google_sub, user_profiles(full_name, avatar_url)";
+const USER_COLS_LEGACY = "id, email, role, user_profiles(full_name, avatar_url)";
 
 async function findUserByGoogleOrEmail(sub, email) {
   let { data, error } = await supabase.from("users").select(USER_COLS).eq("google_sub", sub).maybeSingle();
+  if (error && isMissingColumn(error, "google_sub")) {
+    ({ data, error } = await supabase.from("users").select(USER_COLS_LEGACY).eq("email", email).maybeSingle());
+    if (error) throw error;
+    return data;
+  }
   if (error) throw error;
   if (!data) {
     ({ data, error } = await supabase.from("users").select(USER_COLS).eq("email", email).maybeSingle());
@@ -329,9 +355,14 @@ router.post(
       if (!user) {
         const fullName = String(claims.name || email.split("@")[0]).slice(0, 100);
         const created = { id: crypto.randomUUID(), email, role: "alumni" };
-        const { error: insErr } = await supabase
+        let { error: insErr } = await supabase
           .from("users")
           .insert({ id: created.id, email, password_hash: NO_PASSWORD, role: created.role, google_sub: sub });
+        if (insErr && isMissingColumn(insErr, "google_sub")) {
+          ({ error: insErr } = await supabase
+            .from("users")
+            .insert({ id: created.id, email, password_hash: NO_PASSWORD, role: created.role }));
+        }
 
         if (!insErr) {
           const { error: pErr } = await supabase.from("user_profiles").insert({
@@ -586,7 +617,8 @@ router.post(
       const invalid = () => res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
 
       // Ambil OTP aktif terbaru untuk email ini
-      const { data: record, error } = await supabase
+      let hasAttemptsCol = true;
+      let { data: record, error } = await supabase
         .from("password_reset_otps")
         .select("id, user_id, otp_code, attempts")
         .eq("email", email)
@@ -595,20 +627,34 @@ router.post(
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      if (error && isMissingColumn(error, "attempts")) {
+        hasAttemptsCol = false;
+        ({ data: record, error } = await supabase
+          .from("password_reset_otps")
+          .select("id, user_id, otp_code")
+          .eq("email", email)
+          .eq("used", false)
+          .gte("expires_at", new Date().toISOString())
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle());
+      }
       if (error) throw error;
       if (!record) return invalid();
 
       // Batasi percobaan tebak OTP per kode (anti brute-force 6 digit)
-      if ((record.attempts || 0) >= OTP_MAX_ATTEMPTS) {
+      if (hasAttemptsCol && (record.attempts || 0) >= OTP_MAX_ATTEMPTS) {
         await supabase.from("password_reset_otps").update({ used: true }).eq("id", record.id);
         return invalid();
       }
 
       if (!safeEqual(record.otp_code, otpDigest(email, String(otp).trim()))) {
-        await supabase
-          .from("password_reset_otps")
-          .update({ attempts: (record.attempts || 0) + 1 })
-          .eq("id", record.id);
+        if (hasAttemptsCol) {
+          await supabase
+            .from("password_reset_otps")
+            .update({ attempts: (record.attempts || 0) + 1 })
+            .eq("id", record.id);
+        }
         return invalid();
       }
 
