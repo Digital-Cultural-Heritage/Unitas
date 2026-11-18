@@ -6,7 +6,6 @@ import '../core/theme/text_styles.dart';
 import '../core/api/api_client.dart';
 import '../core/api/posts_service.dart';
 import '../core/utils/image_validator.dart';
-import '../widgets/image_cropper_dialog.dart';
 
 class CreateEventScreen extends StatefulWidget {
   const CreateEventScreen({super.key});
@@ -64,19 +63,10 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         return;
       }
       if (!mounted) return;
-      final cropped = await showImageCropDialog(
-        context,
-        bytes,
-        aspectRatio: 16 / 9,
-        isCircle: false,
-        title: 'Sesuaikan Banner Acara',
-      );
-      if (cropped != null && mounted) {
-        setState(() {
-          _bannerFile = picked;
-          _bannerBytes = cropped;
-        });
-      }
+      setState(() {
+        _bannerFile = picked;
+        _bannerBytes = bytes;
+      });
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -247,14 +237,14 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Banner Acara (Upload Gambar Sendiri)
-                  Text('Banner Acara (Opsional)', style: label.copyWith(fontSize: 13)),
+                  // Pamflet / Banner Acara (Upload Gambar Sendiri)
+                  Text('Pamflet / Banner Acara (Opsional)', style: label.copyWith(fontSize: 13)),
                   const SizedBox(height: 8),
                   InkWell(
                     onTap: _pickBanner,
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
-                      height: 156,
+                      height: 180,
                       width: double.infinity,
                       decoration: BoxDecoration(
                         color: surface,
@@ -269,7 +259,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                                   borderRadius: BorderRadius.circular(14),
                                   child: Image.memory(
                                     _bannerBytes!,
-                                    fit: BoxFit.cover,
+                                    fit: BoxFit.contain,
                                     cacheWidth: 1200,
                                     gaplessPlayback: true,
                                   ),
@@ -310,9 +300,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                                   child: const Icon(Icons.add_photo_alternate_outlined, color: brandNavy, size: 24),
                                 ),
                                 const SizedBox(height: 8),
-                                Text('Pilih Gambar Banner', style: subTitle.copyWith(fontSize: 13.5)),
+                                Text('Pilih Pamflet / Banner Acara', style: subTitle.copyWith(fontSize: 13.5)),
                                 const SizedBox(height: 2),
-                                Text('Tampil sebagai sampul di halaman Acara', style: caption),
+                                Text('Mendukung poster portrait maupun landscape', style: caption),
                               ],
                             ),
                     ),

@@ -703,6 +703,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             )
           : null,
       body: SafeArea(
+        bottom: false,
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
@@ -1367,7 +1368,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           initials: initials,
                           color: _colorFor(post['user_id'] ?? name),
                           size: 40,
-                          avatarUrl: _avatarWithVersion(profile['avatar_url']),
+                          avatarUrl: _isMyPost(post)
+                              ? _avatarWithVersion(profile['avatar_url'])
+                              : profile['avatar_url']?.toString(),
                         ),
                       ),
                       const SizedBox(width: 10),

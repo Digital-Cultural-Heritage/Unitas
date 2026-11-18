@@ -423,6 +423,7 @@ class _JobsScreenState extends State<JobsScreen> {
         label: const Text('Pasang Lowongan', style: TextStyle(fontWeight: FontWeight.w600)),
       ),
       body: SafeArea(
+        bottom: false,
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(

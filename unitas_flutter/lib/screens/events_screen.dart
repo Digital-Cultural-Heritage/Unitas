@@ -644,73 +644,154 @@ class _EventsScreenState extends State<EventsScreen> {
                     )
                   : ListView.builder(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(22, 20, 22, 90),
-                      itemCount: _myEvents.length,
+                      padding: const EdgeInsets.fromLTRB(22, 16, 22, 90),
+                      itemCount: _myEvents.length + 1,
                       itemBuilder: (context, index) {
-                        final ev = _myEvents[index];
-                        return GestureDetector(
-                          onTap: () async {
-                            final deleted = await Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => ManageEventScreen(event: ev)),
-                            );
-                            if (deleted == true && mounted) {
-                              _load();
-                              _loadMyEvents();
-                            }
-                          },
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: surface,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: borderColor),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 52,
-                                  height: 52,
-                                  decoration: BoxDecoration(
-                                    color: brandNavy,
-                                    borderRadius: BorderRadius.circular(10),
+                        if (index == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Text('ACARA YANG KAMU KELOLA', style: label),
+                          );
+                        }
+                        final ev = _myEvents[index - 1];
+                        final category = (ev['category'] ?? 'Acara').toString();
+                        final loc = (ev['location'] ?? '').toString().trim();
+                        final startTime = (ev['start_time'] ?? '').toString().trim();
+                        final meta = [if (startTime.isNotEmpty) startTime, if (loc.isNotEmpty) loc].join(' · ');
+                        final evDate = DateTime.tryParse((ev['event_date'] ?? '').toString());
+                        final today = DateTime.now();
+                        final isPast = evDate != null &&
+                            evDate.isBefore(DateTime(today.year, today.month, today.day));
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: () async {
+                              final deleted = await Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => ManageEventScreen(event: ev)),
+                              );
+                              if (deleted == true && mounted) {
+                                _load();
+                                _loadMyEvents();
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: borderColor),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Container(
+                                    width: 52,
+                                    height: 54,
+                                    decoration: BoxDecoration(
+                                      color: brandNavy,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          _formatDate(ev['event_date']),
+                                          style: statStyle.copyWith(fontSize: 18, color: Colors.white),
+                                        ),
+                                        Text(
+                                          _formatMonth(ev['event_date']),
+                                          style: label.copyWith(color: brandGold, fontSize: 10),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        _formatDate(ev['event_date']),
-                                        style: statStyle.copyWith(fontSize: 18, color: Colors.white),
-                                      ),
-                                      Text(
-                                        _formatMonth(ev['event_date']),
-                                        style: label.copyWith(color: brandGold, fontSize: 10),
-                                      ),
-                                    ],
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: (isPast ? dim2 : brandGreen).withValues(alpha: 0.14),
+                                                borderRadius: BorderRadius.circular(99),
+                                              ),
+                                              child: Text(
+                                                isPast ? 'Selesai' : '● Aktif',
+                                                style: label.copyWith(
+                                                  color: isPast ? dim1 : brandGreen,
+                                                  fontSize: 10,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: brandGold.withValues(alpha: 0.18),
+                                                borderRadius: BorderRadius.circular(99),
+                                              ),
+                                              child: Text(
+                                                category,
+                                                style: label.copyWith(color: brandNavy, fontSize: 10),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 5),
+                                        Text(
+                                          ev['title']?.toString() ?? '',
+                                          style: subTitle,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (meta.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            meta,
+                                            style: caption.copyWith(fontSize: 11.5),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${ev['attendee_count'] ?? 0} pendaftar',
+                                          style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        ev['title']?.toString() ?? '',
-                                        style: subTitle,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${ev['attendee_count'] ?? 0} pendaftar',
-                                        style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
-                                      ),
-                                    ],
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: brandNavy.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Kelola',
+                                          style: caption.copyWith(
+                                            color: brandNavy,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 11.5,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 2),
+                                        const Icon(Icons.chevron_right, size: 15, color: brandNavy),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const Icon(Icons.chevron_right, color: dim2),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         );
@@ -723,14 +804,18 @@ class _EventsScreenState extends State<EventsScreen> {
     final id = ev['id']?.toString() ?? '$index';
     final isReg = _registered.contains(id);
     final startTime = ev['start_time']?.toString().trim() ?? '';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: surface,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: () => _openEventDetailSheet(ev),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor),
-      ),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor),
+          ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -845,6 +930,8 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
         ],
       ),
+        ),
+      ),
     );
   }
 
@@ -933,13 +1020,17 @@ class _EventsScreenState extends State<EventsScreen> {
                 ),
 
                 if (featured != null)
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(22, 0, 22, 16),
-                    height: 170,
-                    decoration: BoxDecoration(
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
+                    child: InkWell(
+                      onTap: () => _openEventDetailSheet(featured),
                       borderRadius: BorderRadius.circular(16),
-                      color: surface,
-                    ),
+                      child: Container(
+                        height: 170,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: surface,
+                        ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: Stack(
@@ -1005,6 +1096,8 @@ class _EventsScreenState extends State<EventsScreen> {
                       ),
                     ),
                   ),
+                ),
+              ),
 
                 // Category chips (anti-terpotong)
                 SizedBox(
@@ -1104,6 +1197,257 @@ class _EventsScreenState extends State<EventsScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  void _openPamphletViewer(String url) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) => Stack(
+        children: [
+          Center(
+            child: InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 4.0,
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: SafeArea(
+              child: IconButton.filled(
+                style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                onPressed: () => Navigator.pop(ctx),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openEventDetailSheet(Map<String, dynamic> ev) {
+    final id = ev['id']?.toString() ?? '';
+    final isReg = _registered.contains(id);
+    final coverUrl = ev['cover_url']?.toString().trim() ?? '';
+    final title = (ev['title'] ?? 'Acara Alumni').toString();
+    final category = (ev['category'] ?? 'Acara').toString();
+    final desc = (ev['description'] ?? '').toString().trim();
+    final loc = (ev['location'] ?? '').toString().trim();
+    final isOnline = ev['is_online'] == true;
+    final startTime = (ev['start_time'] ?? '').toString().trim();
+    final endTime = (ev['end_time'] ?? '').toString().trim();
+    final timeStr = [startTime, endTime].where((s) => s.isNotEmpty).join(' – ');
+    final dateStr = '${_formatDate(ev['event_date'])} ${_formatMonth(ev['event_date'])}';
+    final count = ev['attendee_count']?.toString() ?? '0';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetCtx).size.height * 0.88,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 16, 22, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: dim3, borderRadius: BorderRadius.circular(99)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: brandGold.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              category.toUpperCase(),
+                              style: label.copyWith(color: brandNavy, fontSize: 10.5),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(title, style: heading.copyWith(fontSize: 20)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetCtx),
+                      icon: const Icon(Icons.close, size: 20, color: dim1),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Tutup',
+                    ),
+                  ],
+                ),
+
+                if (coverUrl.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  GestureDetector(
+                    onTap: () => _openPamphletViewer(coverUrl),
+                    child: Container(
+                      width: double.infinity,
+                      constraints: const BoxConstraints(maxHeight: 360),
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          Center(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(13),
+                              child: Image.network(
+                                coverUrl,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, _, _) => const SizedBox(height: 80),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            margin: const EdgeInsets.all(10),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.zoom_in, color: Colors.white, size: 15),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Tap untuk perbesar',
+                                  style: caption.copyWith(color: Colors.white, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.calendar_today_outlined, size: 16, color: brandNavy),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              timeStr.isNotEmpty ? '$dateStr · $timeStr' : dateStr,
+                              style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Icon(
+                            isOnline ? Icons.videocam_outlined : Icons.location_on_outlined,
+                            size: 16,
+                            color: brandNavy,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              isOnline ? '$loc (Online)' : loc,
+                              style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          const Icon(Icons.people_outline, size: 16, color: brandNavy),
+                          const SizedBox(width: 10),
+                          Text(
+                            '$count alumni akan hadir',
+                            style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                if (desc.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Deskripsi Acara', style: label),
+                  const SizedBox(height: 6),
+                  Text(
+                    desc,
+                    style: body.copyWith(color: textPrimary, height: 1.5),
+                  ),
+                ],
+
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isReg ? surface : brandNavy,
+                      foregroundColor: isReg ? dim1 : Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: isReg ? const BorderSide(color: borderColor) : BorderSide.none,
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(sheetCtx);
+                      _handleRegisterTap(ev);
+                    },
+                    child: Text(
+                      isReg ? 'Terdaftar ✓ (Ketuk untuk kelola)' : 'Daftar Acara',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
