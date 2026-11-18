@@ -131,7 +131,22 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   validator: (v) => v == null || v.length < 8 ? 'Password minimal 8 karakter' : null,
                 ),
-                const SizedBox(height: 28),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _openForgotPasswordSheet,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      'Lupa kata sandi?',
+                      style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // Login button
                 SizedBox(
@@ -209,4 +224,139 @@ class _LoginScreenState extends State<LoginScreen> {
       borderSide: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
     ),
   );
+
+  void _openForgotPasswordSheet() {
+    final emailCtrl = TextEditingController(text: _emailCtrl.text.trim());
+    final otpCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    bool otpSent = false;
+    bool busy = false;
+    String? devOtpHint;
+    String? errMsg;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (sheetCtx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            MediaQuery.of(sheetCtx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Reset Kata Sandi', style: heading.copyWith(fontSize: 18)),
+                const SizedBox(height: 6),
+                Text(
+                  otpSent
+                      ? 'Masukkan kode OTP 6 digit dan kata sandi baru kamu.'
+                      : 'Masukkan email terdaftar untuk menerima kode OTP.',
+                  style: caption,
+                ),
+                const SizedBox(height: 16),
+                if (errMsg != null) ...[
+                  Text(errMsg!, style: caption.copyWith(color: Colors.red)),
+                  const SizedBox(height: 8),
+                ],
+                if (devOtpHint != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: brandGold.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Kode OTP (dev): $devOtpHint',
+                      style: label.copyWith(color: brandNavy),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                TextField(
+                  controller: emailCtrl,
+                  enabled: !otpSent,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: _inputDeco('nama@alumni.ac.id', Icons.email_outlined),
+                ),
+                if (otpSent) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: otpCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: _inputDeco('Kode OTP 6 digit', Icons.pin_outlined),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: newPassCtrl,
+                    obscureText: true,
+                    decoration: _inputDeco('Kata sandi baru (min 8 karakter)', Icons.lock_outline),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brandNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          setSheet(() {
+                            busy = true;
+                            errMsg = null;
+                          });
+                          try {
+                            if (!otpSent) {
+                              final res = await AuthService.forgotPassword(emailCtrl.text.trim());
+                              setSheet(() {
+                                otpSent = true;
+                                busy = false;
+                                devOtpHint = res['dev_otp']?.toString();
+                              });
+                            } else {
+                              await AuthService.resetPassword(
+                                email: emailCtrl.text.trim(),
+                                otp: otpCtrl.text.trim(),
+                                newPassword: newPassCtrl.text,
+                              );
+                              if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Password berhasil direset. Silakan login.')),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            setSheet(() {
+                              busy = false;
+                              errMsg = e.toString().replaceFirst('Exception: ', '');
+                            });
+                          }
+                        },
+                  child: busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : Text(otpSent ? 'Simpan Kata Sandi Baru' : 'Kirim Kode OTP', style: buttonStyle),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -179,6 +179,7 @@ class _MainShellState extends State<MainShell> {
             refreshTrigger: _homeRefreshTick,
             onOpenDirectory: () => setState(() => _currentIndex = 1),
             onOpenEvents: () => setState(() => _currentIndex = 2),
+            onOpenJobs: () => setState(() => _currentIndex = 3),
           ),
           ..._otherScreens,
         ],

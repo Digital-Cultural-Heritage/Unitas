@@ -27,6 +27,21 @@ router.get("/saved", requireAuth, async (req, res, next) => {
   }
 });
 
+// ── GET /api/jobs/my-jobs/all — Lowongan yang dibuat user sendiri ────────
+router.get("/my-jobs/all", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("*")
+      .eq("poster_id", req.user.userId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    res.json({ data: data || [] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── GET /api/jobs ─────────────────────────────────────────────────────────
 router.get("/", async (req, res, next) => {
   try {
@@ -36,8 +51,8 @@ router.get("/", async (req, res, next) => {
     let dbQuery = supabase
       .from("jobs")
       .select(`
-        id, title, company, company_logo, location, job_type,
-        salary_min, salary_max, tags, created_at,
+        id, poster_id, title, company, company_logo, location, job_type,
+        salary_min, salary_max, tags, description, apply_url, contact_email, is_active, created_at,
         poster:poster_id(id, user_profiles(full_name, prodi, angkatan))
       `, { count: "exact" })
       .eq("is_active", true)
@@ -84,7 +99,10 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     try {
-      const { title, company, company_logo, location, job_type, salary_min, salary_max, tags, description } = req.body;
+      const {
+        title, company, company_logo, location, job_type,
+        salary_min, salary_max, tags, description, apply_url, contact_email,
+      } = req.body;
       const { data, error } = await supabase
         .from("jobs")
         .insert({
@@ -95,6 +113,8 @@ router.post(
           salary_max: salary_max || null,
           tags: tags || [],
           description: description || null,
+          apply_url: apply_url || null,
+          contact_email: contact_email || null,
         })
         .select()
         .single();
@@ -105,6 +125,59 @@ router.post(
     }
   }
 );
+
+// ── PUT /api/jobs/:id — Edit / Tutup / Aktifkan lowongan ──────────────────
+router.put("/:id", requireAuth, async (req, res, next) => {
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from("jobs")
+      .select("poster_id")
+      .eq("id", req.params.id)
+      .single();
+    if (fetchErr || !existing) return res.status(404).json({ error: "Lowongan tidak ditemukan" });
+    if (existing.poster_id !== req.user.userId) return res.status(403).json({ error: "Tidak diizinkan" });
+
+    const allowed = [
+      "title", "company", "company_logo", "location", "job_type",
+      "salary_min", "salary_max", "tags", "description",
+      "apply_url", "contact_email", "is_active",
+    ];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
+    const { data, error } = await supabase
+      .from("jobs")
+      .update(updates)
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/jobs/:id — Hapus lowongan ─────────────────────────────────
+router.delete("/:id", requireAuth, async (req, res, next) => {
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from("jobs")
+      .select("poster_id")
+      .eq("id", req.params.id)
+      .single();
+    if (fetchErr || !existing) return res.status(404).json({ error: "Lowongan tidak ditemukan" });
+    if (existing.poster_id !== req.user.userId) return res.status(403).json({ error: "Tidak diizinkan" });
+
+    const { error } = await supabase.from("jobs").delete().eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ message: "Lowongan dihapus" });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── POST /api/jobs/:id/save — Toggle simpan ───────────────────────────────
 router.post("/:id/save", requireAuth, async (req, res, next) => {

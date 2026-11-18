@@ -1,9 +1,11 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/jobs_service.dart';
 import '../widgets/skeleton.dart';
 import 'create_job_screen.dart';
+import 'manage_job_screen.dart';
 
 class JobsScreen extends StatefulWidget {
   const JobsScreen({super.key});
@@ -195,22 +197,55 @@ class _JobsScreenState extends State<JobsScreen> {
                               Text('Bursa Karier', style: heading),
                             ],
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: brandGold.withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.business_center_outlined, size: 15, color: brandNavy),
-                                const SizedBox(width: 5),
-                                Text(
-                                  '${list.length} Lowongan',
-                                  style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                          Row(
+                            children: [
+                              InkWell(
+                                onTap: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const ManageJobScreen()),
+                                  );
+                                  _load();
+                                },
+                                borderRadius: BorderRadius.circular(10),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: surface,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: borderColor),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.tune, size: 15, color: brandNavy),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Kelola',
+                                        style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: brandGold.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.business_center_outlined, size: 15, color: brandNavy),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      '${list.length} Lowongan',
+                                      style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -512,11 +547,9 @@ class _JobsScreenState extends State<JobsScreen> {
                                             elevation: 0,
                                           ),
                                           onPressed: () {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Mengarahkan ke halaman lamaran (Segera hadir)')),
-                                            );
+                                            _showApplySheet(job);
                                           },
-                                          child: const Text('Lamar Cepat', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          child: const Text('Lamar Sekarang', style: TextStyle(fontWeight: FontWeight.bold)),
                                         ),
                                       ],
                                     ),
@@ -533,6 +566,81 @@ class _JobsScreenState extends State<JobsScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showApplySheet(Map<String, dynamic> job) {
+    final applyUrl = job['apply_url']?.toString().trim() ?? '';
+    final contactEmail = job['contact_email']?.toString().trim() ?? '';
+    final title = job['title']?.toString() ?? 'Lowongan';
+    final company = job['company']?.toString() ?? '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Lamar: $title'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (company.isNotEmpty) ...[
+              Text(company, style: subTitle),
+              const SizedBox(height: 10),
+            ],
+            if (applyUrl.isEmpty && contactEmail.isEmpty)
+              Text(
+                'Pembuat lowongan belum mencantumkan link atau email lamaran. Kamu bisa menghubungi alumni terkait melalui tab Alumni.',
+                style: body.copyWith(fontSize: 13),
+              ),
+            if (applyUrl.isNotEmpty) ...[
+              Text('Link Lamaran:', style: label),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(applyUrl, style: body.copyWith(color: brandNavy, fontSize: 13)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: 'Salin link',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: applyUrl));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Link lamaran disalin')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (contactEmail.isNotEmpty) ...[
+              Text('Email Rekruter:', style: label),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(contactEmail, style: body.copyWith(color: brandNavy, fontSize: 13)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: 'Salin email',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: contactEmail));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Email rekruter disalin')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup')),
+        ],
       ),
     );
   }

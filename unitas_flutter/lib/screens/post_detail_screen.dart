@@ -51,6 +51,32 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  bool _isMyComment(Map<String, dynamic> c) {
+    final myId = _me?['id'] ?? _me?['user_id'];
+    final authorId = c['user']?['id'] ?? c['user_id'];
+    return myId != null && authorId != null && myId == authorId;
+  }
+
+  Future<void> _deleteComment(String commentId) async {
+    try {
+      await PostsService.deleteComment(widget.post['id'].toString(), commentId);
+      if (mounted) {
+        setState(() {
+          _comments.removeWhere((c) => c['id']?.toString() == commentId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Komentar dihapus')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal menghapus komentar')),
+        );
+      }
+    }
+  }
+
   Future<void> _submitComment() async {
     final text = _commentCtrl.text.trim();
     if (text.isEmpty) return;
@@ -62,8 +88,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         _commentCtrl.clear();
       });
       FocusScope.of(context).unfocus();
-    } catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal mengirim komentar')));
+    } catch (e) {
+      if (mounted) {
+        final msg = e.toString().replaceFirst('Exception: ', '').replaceFirst('ApiException: ', '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal mengirim komentar: $msg')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -213,6 +244,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                     Text(p['full_name'] ?? 'Alumni Unitas', style: body.copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
                                     const SizedBox(width: 8),
                                     Text(_timeAgo(c['created_at']), style: caption.copyWith(fontSize: 11)),
+                                    const Spacer(),
+                                    if (_isMyComment(c) && c['id'] != null)
+                                      InkWell(
+                                        onTap: () => _deleteComment(c['id'].toString()),
+                                        child: const Padding(
+                                          padding: EdgeInsets.all(4),
+                                          child: Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                                        ),
+                                      ),
                                   ],
                                 ),
                                 const SizedBox(height: 2),

@@ -5,6 +5,7 @@ import '../core/api/users_service.dart';
 import '../core/api/api_client.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
+import 'chat_room_screen.dart';
 
 class DirectoryScreen extends StatefulWidget {
   const DirectoryScreen({super.key});
@@ -264,6 +265,38 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                   ),
                 ),
               ),
+            if (!isMe && isConnected) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brandNavy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatRoomScreen(
+                          peerId: userId,
+                          peerName: (p['full_name'] ?? 'Alumni').toString(),
+                          peerInitials: _initials(p),
+                          peerAvatarUrl: p['avatar_url']?.toString(),
+                          peerSubtitle: jobLine,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                  label: const Text('Kirim Pesan'),
+                ),
+              ),
+            ],
           ],
         ),
       ),

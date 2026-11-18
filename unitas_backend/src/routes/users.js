@@ -2,6 +2,7 @@ const express = require("express");
 const { body, query, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { createNotification } = require("../lib/notifications");
 const { verifyAccessToken } = require("../lib/jwt");
 
 const router = express.Router();
@@ -167,6 +168,20 @@ router.post("/:id/connect", requireAuth, async (req, res, next) => {
       .select()
       .single();
     if (error) throw error;
+
+    const { data: actorProfile } = await supabase
+      .from("user_profiles")
+      .select("full_name")
+      .eq("user_id", requesterId)
+      .single();
+    await createNotification({
+      userId: addresseeId,
+      actorId: requesterId,
+      type: "connection_request",
+      title: `${actorProfile?.full_name || "Alumni"} mengirim permintaan koneksi`,
+      referenceId: data.id,
+    });
+
     res.status(201).json({ message: "Permintaan koneksi dikirim", connection: data });
   } catch (err) {
     next(err);
@@ -226,6 +241,20 @@ router.put("/requests/:id", requireAuth, async (req, res, next) => {
       .select()
       .single();
     if (error) throw error;
+    if (status === "accepted" && data) {
+      const { data: actorProfile } = await supabase
+        .from("user_profiles")
+        .select("full_name")
+        .eq("user_id", req.user.userId)
+        .single();
+      await createNotification({
+        userId: data.requester_id,
+        actorId: req.user.userId,
+        type: "connection_accepted",
+        title: `${actorProfile?.full_name || "Alumni"} menerima permintaan koneksimu`,
+        referenceId: data.id,
+      });
+    }
     res.json(data);
   } catch (err) {
     next(err);

@@ -6,23 +6,30 @@ import '../core/api/posts_service.dart';
 import '../core/api/stats_service.dart';
 import '../core/api/users_service.dart';
 import '../core/api/events_service.dart';
+import '../core/api/jobs_service.dart';
+import '../core/api/notifications_service.dart';
+import '../core/api/messages_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/image_cropper_dialog.dart';
 import '../core/utils/image_validator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'post_detail_screen.dart';
+import 'notifications_screen.dart';
+import 'chat_list_screen.dart';
 
 
 class HomeScreen extends StatefulWidget {
   final int refreshTrigger;
   final VoidCallback? onOpenEvents;
   final VoidCallback? onOpenDirectory;
+  final VoidCallback? onOpenJobs;
   const HomeScreen({
     super.key,
     this.refreshTrigger = 0,
     this.onOpenEvents,
     this.onOpenDirectory,
+    this.onOpenJobs,
   });
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -30,10 +37,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _posts = [];
-  List<Map<String, dynamic>> _leaderboard = [];
   List<Map<String, dynamic>> _upcomingEvents = [];
+  List<Map<String, dynamic>> _latestJobs = [];
   Map<String, dynamic> _stats = {};
   Map<String, dynamic>? _me;
+  int _unreadNotifications = 0;
+  int _unreadMessages = 0;
   bool _loadingFeed = true;
   bool _loadingMeta = true;
   bool _posting = false;
@@ -65,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
-    // Load me, stats, leaderboard in parallel
+    // Load me, stats, events, and jobs in parallel
     _loadMeta();
     // Load feed
     try {
@@ -80,16 +89,22 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final results = await Future.wait([
         StatsService.getStats(),
-        PostsService.getLeaderboard(limit: 3),
         UsersService.getMe().catchError((_) => <String, dynamic>{}),
         EventsService.getEvents().catchError((_) => <Map<String, dynamic>>[]),
+        JobsService.getJobs().catchError((_) => <Map<String, dynamic>>[]),
+        NotificationsService.getNotifications(limit: 10).catchError((_) => <String, dynamic>{}),
+        MessagesService.getConversations().catchError((_) => <String, dynamic>{}),
       ]);
       if (mounted) {
+        final notifRes = results[4] as Map<String, dynamic>;
+        final msgRes = results[5] as Map<String, dynamic>;
         setState(() {
           _stats = results[0] as Map<String, dynamic>;
-          _leaderboard = (results[1] as List).cast<Map<String, dynamic>>();
-          _me = results[2] as Map<String, dynamic>?;
-          _upcomingEvents = (results[3] as List).cast<Map<String, dynamic>>().take(3).toList();
+          _me = results[1] as Map<String, dynamic>?;
+          _upcomingEvents = (results[2] as List).cast<Map<String, dynamic>>().take(3).toList();
+          _latestJobs = (results[3] as List).cast<Map<String, dynamic>>().take(3).toList();
+          _unreadNotifications = (notifRes['unread_count'] as num?)?.toInt() ?? 0;
+          _unreadMessages = (msgRes['total_unread'] as num?)?.toInt() ?? 0;
           _loadingMeta = false;
         });
       }
@@ -252,6 +267,60 @@ class _HomeScreenState extends State<HomeScreen> {
     final myId = _me?['id'] ?? _me?['user_id'];
     final posterId = post['user']?['id'] ?? post['user_id'];
     return myId != null && posterId != null && myId == posterId;
+  }
+
+  Future<void> _editPostDialog(Map<String, dynamic> post) async {
+    final postId = post['id']?.toString();
+    if (postId == null) return;
+    final ctrl = TextEditingController(text: post['content']?.toString() ?? '');
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Edit Postingan'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 5,
+          minLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Tulis pembaruan…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: brandNavy),
+            onPressed: () {
+              final txt = ctrl.text.trim();
+              if (txt.isNotEmpty) Navigator.pop(c, txt);
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    if (updated == null) return;
+
+    try {
+      final res = await PostsService.updatePost(postId, updated);
+      if (mounted) {
+        setState(() {
+          final idx = _posts.indexWhere((p) => p['id']?.toString() == postId);
+          if (idx != -1) {
+            _posts[idx] = {..._posts[idx], 'content': res['content'] ?? updated};
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Postingan berhasil diperbarui')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memperbarui postingan')),
+        );
+      }
+    }
   }
 
   Future<void> _deletePost(String postId) async {
@@ -525,29 +594,80 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          Stack(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: surface,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: borderColor),
-                ),
-                child: const Icon(Icons.notifications_outlined, color: brandNavy, size: 20),
-              ),
-              Positioned(
-                top: 6, right: 6,
-                child: Container(
-                  width: 8, height: 8,
+          InkWell(
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ChatListScreen()),
+              );
+              _loadMeta();
+            },
+            borderRadius: BorderRadius.circular(99),
+            child: Stack(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: brandGold,
+                    color: surface,
                     shape: BoxShape.circle,
-                    border: Border.all(color: surface, width: 1.5),
+                    border: Border.all(color: borderColor),
                   ),
+                  child: const Icon(Icons.chat_bubble_outline, color: brandNavy, size: 20),
                 ),
-              ),
-            ],
+                if (_unreadMessages > 0)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: surface, width: 1.5),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              );
+              _loadMeta();
+            },
+            borderRadius: BorderRadius.circular(99),
+            child: Stack(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: const Icon(Icons.notifications_outlined, color: brandNavy, size: 20),
+                ),
+                if (_unreadNotifications > 0)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: brandGold,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: surface, width: 1.5),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(width: 10),
           UnitasAvatar(
@@ -617,13 +737,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildHighlights() {
     final totalAlumni = _stats['total_alumni'];
     final activeEvents = _stats['active_events'];
+    final totalJobs = _stats['total_jobs'];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
-          child: Text('Sorotan & Peringkat', style: label),
+          child: Text('Sorotan Acara & Karier', style: label),
         ),
         SizedBox(
           height: 112,
@@ -654,81 +775,92 @@ class _HomeScreenState extends State<HomeScreen> {
                   accent: brandGold,
                 ),
               ),
+              const SizedBox(width: 10),
+              InkWell(
+                onTap: widget.onOpenJobs,
+                borderRadius: BorderRadius.circular(14),
+                child: _highlightStatCard(
+                  icon: Icons.work_outline,
+                  value: totalJobs?.toString() ?? '—',
+                  title: 'Lowongan Aktif',
+                  subtitle: 'peluang karier',
+                  accent: brandNavy,
+                ),
+              ),
               ..._upcomingEvents.map((ev) => Padding(
                 padding: const EdgeInsets.only(left: 10),
                 child: _highlightEventCard(ev),
               )),
-              ..._leaderboard.asMap().entries.map((e) {
-                final i = e.key;
-                final item = e.value;
-                final rank = item['rank'] ?? (i + 1);
-                final name = (item['full_name'] ?? '—').toString();
-                final pts = item['points']?.toString() ?? '0';
-                final ini = item['initials'] ??
-                    name.substring(0, name.length >= 2 ? 2 : 1).toUpperCase();
-                return Padding(
-                  padding: const EdgeInsets.only(left: 10),
-                  child: Container(
-                    width: 132,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: rank == 1 ? brandGold.withValues(alpha: 0.6) : borderColor,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            UnitasAvatar(
-                              initials: ini,
-                              color: _colorFor(item['user_id'] ?? name),
-                              size: 30,
-                              avatarUrl: _avatarWithVersion(item['avatar_url']),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: rank == 1 ? brandGold.withValues(alpha: 0.2) : card,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '#$rank',
-                                style: label.copyWith(
-                                  color: rank == 1 ? brandNavy : dim1,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              name,
-                              style: subTitle.copyWith(fontSize: 13),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text('$pts poin', style: caption),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
+              ..._latestJobs.map((job) => Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: _highlightJobCard(job),
+              )),
             ],
           ),
         ),
         const SizedBox(height: 16),
       ],
+    );
+  }
+
+  Widget _highlightJobCard(Map<String, dynamic> job) {
+    final jobType = (job['job_type'] ?? 'Full-time').toString();
+    final company = (job['company'] ?? '').toString();
+    final location = (job['location'] ?? '').toString();
+    final companyMeta = [company, location].where((s) => s.isNotEmpty).join(' • ');
+
+    return InkWell(
+      onTap: widget.onOpenJobs,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: 186,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: brandNavy.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    jobType,
+                    style: label.copyWith(color: brandNavy, fontWeight: FontWeight.w700, fontSize: 10),
+                  ),
+                ),
+                const Icon(Icons.work_outline, size: 16, color: brandGold),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  job['title'] ?? 'Lowongan Kerja',
+                  style: subTitle.copyWith(fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  companyMeta.isNotEmpty ? companyMeta : 'Karier Alumni',
+                  style: caption.copyWith(fontSize: 11),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -966,9 +1098,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
                                 onSelected: (val) {
+                                  if (val == 'edit') _editPostDialog(post);
                                   if (val == 'delete') _deletePost(id);
                                 },
                                 itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.edit_outlined, color: brandNavy, size: 18),
+                                        SizedBox(width: 8),
+                                        Text('Edit Postingan'),
+                                      ],
+                                    ),
+                                  ),
                                   PopupMenuItem(
                                     value: 'delete',
                                     child: Row(

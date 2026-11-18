@@ -1,8 +1,10 @@
 ﻿const express = require("express");
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require("../lib/jwt");
+const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -176,5 +178,150 @@ router.post("/logout", async (req, res, next) => {
     next(err);
   }
 });
+
+// ── POST /api/auth/change-password ────────────────────────────────────────
+router.post(
+  "/change-password",
+  requireAuth,
+  [
+    body("current_password").notEmpty().withMessage("Password saat ini wajib diisi"),
+    body("new_password").isLength({ min: 8 }).withMessage("Password baru minimal 8 karakter"),
+  ],
+  async (req, res, next) => {
+    if (!validate(req, res)) return;
+    try {
+      const { current_password, new_password } = req.body;
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("id, password_hash")
+        .eq("id", req.user.userId)
+        .single();
+      if (error || !user) return res.status(404).json({ error: "User tidak ditemukan" });
+
+      const match = await bcrypt.compare(current_password, user.password_hash);
+      if (!match) return res.status(401).json({ error: "Password saat ini salah" });
+
+      const password_hash = await bcrypt.hash(new_password, 12);
+      const { error: updErr } = await supabase
+        .from("users")
+        .update({ password_hash })
+        .eq("id", user.id);
+      if (updErr) throw updErr;
+
+      res.json({ message: "Password berhasil diubah" });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── POST /api/auth/forgot-password ────────────────────────────────────────
+router.post(
+  "/forgot-password",
+  [body("email").isEmail().normalizeEmail().withMessage("Email tidak valid")],
+  async (req, res, next) => {
+    if (!validate(req, res)) return;
+    try {
+      const { email } = req.body;
+      const { data: user } = await supabase
+        .from("users")
+        .select("id, email")
+        .eq("email", email)
+        .single();
+
+      // Always return generic success to avoid leaking registered emails
+      if (!user) {
+        return res.json({ message: "Jika email terdaftar, kode OTP telah dikirim" });
+      }
+
+      const otpCode = String(crypto.randomInt(100000, 1000000));
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+      await supabase
+        .from("password_reset_otps")
+        .insert({
+          user_id: user.id,
+          email: user.email,
+          otp_code: otpCode,
+          expires_at: expiresAt,
+        });
+
+      // Optional email dispatch via Resend if configured
+      if (process.env.RESEND_API_KEY) {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: process.env.EMAIL_FROM || "Unitas <noreply@unitas.app>",
+            to: [user.email],
+            subject: "Kode Reset Password Unitas",
+            html: `<p>Kode OTP reset password kamu adalah: <strong>${otpCode}</strong>. Berlaku selama 15 menit.</p>`,
+          }),
+        }).catch((e) => console.error("Resend email error:", e.message));
+      } else {
+        console.log(`[Unitas OTP] ${user.email}: ${otpCode}`);
+      }
+
+      const payload = { message: "Jika email terdaftar, kode OTP telah dikirim" };
+      if (process.env.NODE_ENV !== "production" && !process.env.RESEND_API_KEY) {
+        payload.dev_otp = otpCode;
+      }
+      res.json(payload);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── POST /api/auth/reset-password ─────────────────────────────────────────
+router.post(
+  "/reset-password",
+  [
+    body("email").isEmail().normalizeEmail().withMessage("Email tidak valid"),
+    body("otp").notEmpty().withMessage("Kode OTP wajib diisi"),
+    body("new_password").isLength({ min: 8 }).withMessage("Password baru minimal 8 karakter"),
+  ],
+  async (req, res, next) => {
+    if (!validate(req, res)) return;
+    try {
+      const { email, otp, new_password } = req.body;
+      const nowIso = new Date().toISOString();
+
+      const { data: record } = await supabase
+        .from("password_reset_otps")
+        .select("id, user_id, otp_code, expires_at")
+        .eq("email", email)
+        .eq("otp_code", String(otp).trim())
+        .eq("used", false)
+        .gte("expires_at", nowIso)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!record) {
+        return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
+      }
+
+      const password_hash = await bcrypt.hash(new_password, 12);
+      const { error: updErr } = await supabase
+        .from("users")
+        .update({ password_hash, refresh_token: null })
+        .eq("id", record.user_id);
+      if (updErr) throw updErr;
+
+      await supabase
+        .from("password_reset_otps")
+        .update({ used: true })
+        .eq("id", record.id);
+
+      res.json({ message: "Password berhasil direset. Silakan login kembali." });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 module.exports = router;

@@ -27,4 +27,22 @@ class JobsService {
     final res = await ApiClient.post('/api/jobs/$jobId/save');
     return res['saved'] == true;
   }
+
+  // ── My Jobs (created by current user) ──────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getMyJobs() async {
+    final res = await ApiClient.get('/api/jobs/my-jobs/all');
+    final list = res['data'] as List? ?? [];
+    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  // ── Update Job ─────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> updateJob(String jobId, Map<String, dynamic> data) async {
+    final res = await ApiClient.put('/api/jobs/$jobId', body: data);
+    return Map<String, dynamic>.from(res);
+  }
+
+  // ── Delete Job ─────────────────────────────────────────────────────────
+  static Future<void> deleteJob(String jobId) async {
+    await ApiClient.delete('/api/jobs/$jobId');
+  }
 }

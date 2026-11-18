@@ -557,52 +557,109 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _openChangePasswordSheet() {
-    _showSettingSheet(
-      title: 'Ubah Kata Sandi',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor),
-            ),
+    final currentCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    bool busy = false;
+    String? errMsg;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (sheetCtx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            MediaQuery.of(sheetCtx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Akun Terdaftar', style: subTitle),
-                const SizedBox(height: 4),
-                Text(_profile?['email']?.toString() ?? '—', style: caption),
+                Text('Ubah Kata Sandi', style: heading.copyWith(fontSize: 18)),
+                const SizedBox(height: 14),
+                if (errMsg != null) ...[
+                  Text(errMsg!, style: caption.copyWith(color: Colors.red)),
+                  const SizedBox(height: 10),
+                ],
+                TextField(
+                  controller: currentCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Kata Sandi Saat Ini'),
+                ),
                 const SizedBox(height: 10),
-                Text(
-                  'Untuk alasan keamanan, permintaan ubah atau reset kata sandi diproses melalui admin Unitas agar kepemilikan akun alumni tetap terverifikasi.',
-                  style: body.copyWith(fontSize: 13),
+                TextField(
+                  controller: newCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Kata Sandi Baru (min 8 karakter)'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: confirmCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Konfirmasi Kata Sandi Baru'),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brandNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          if (newCtrl.text.length < 8) {
+                            setSheet(() => errMsg = 'Password baru minimal 8 karakter');
+                            return;
+                          }
+                          if (newCtrl.text != confirmCtrl.text) {
+                            setSheet(() => errMsg = 'Konfirmasi password tidak cocok');
+                            return;
+                          }
+                          setSheet(() {
+                            busy = true;
+                            errMsg = null;
+                          });
+                          try {
+                            await AuthService.changePassword(
+                              currentPassword: currentCtrl.text,
+                              newPassword: newCtrl.text,
+                            );
+                            if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Kata sandi berhasil diubah')),
+                              );
+                            }
+                          } catch (e) {
+                            setSheet(() {
+                              busy = false;
+                              errMsg = e.toString().replaceFirst('Exception: ', '');
+                            });
+                          }
+                        },
+                  child: busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : Text('Simpan Kata Sandi', style: buttonStyle),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: brandNavy,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                elevation: 0,
-              ),
-              onPressed: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Permintaan reset kata sandi dapat dikirim ke support@unitas.id')),
-                );
-              },
-              child: Text('Mengerti', style: buttonStyle),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

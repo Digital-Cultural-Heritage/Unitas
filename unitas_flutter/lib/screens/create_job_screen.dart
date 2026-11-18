@@ -19,6 +19,8 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   final _salaryMaxCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _tagsCtrl = TextEditingController();
+  final _applyUrlCtrl = TextEditingController();
+  final _contactEmailCtrl = TextEditingController();
 
   String _type = 'Full-time';
   bool _isRemote = false;
@@ -35,6 +37,8 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     _salaryMaxCtrl.dispose();
     _descCtrl.dispose();
     _tagsCtrl.dispose();
+    _applyUrlCtrl.dispose();
+    _contactEmailCtrl.dispose();
     super.dispose();
   }
 
@@ -87,6 +91,8 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
       if (sMin != null) body['salary_min'] = sMin;
       if (sMax != null) body['salary_max'] = sMax;
       if (tags.isNotEmpty) body['tags'] = tags;
+      if (_applyUrlCtrl.text.trim().isNotEmpty) body['apply_url'] = _applyUrlCtrl.text.trim();
+      if (_contactEmailCtrl.text.trim().isNotEmpty) body['contact_email'] = _contactEmailCtrl.text.trim();
 
       await ApiClient.post('/api/jobs', body: body);
 
@@ -247,6 +253,20 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                     Icons.label_outline,
                     'Contoh: Node.js, Remote, Startup',
                     onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 14),
+                  _field(
+                    'Link Lamaran (opsional)',
+                    _applyUrlCtrl,
+                    Icons.link,
+                    'Contoh: https://karir.perusahaan.com/apply',
+                  ),
+                  const SizedBox(height: 14),
+                  _field(
+                    'Email Rekruter (opsional)',
+                    _contactEmailCtrl,
+                    Icons.email_outlined,
+                    'Contoh: hr@perusahaan.com',
                   ),
                   const SizedBox(height: 8),
                   Wrap(
