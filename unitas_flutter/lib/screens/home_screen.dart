@@ -51,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _loadingMeta = true;
   bool _loadingMoreFeed = false;
   bool _hasMoreFeed = true;
+  bool _showScrollFab = false;
   int _feedPage = 1;
   String? _feedError;
   int _loadSeq = 0;
@@ -116,6 +117,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onScroll() {
     if (!_scrollCtrl.hasClients) return;
+    final shouldShowFab = _scrollCtrl.offset > 300;
+    if (shouldShowFab != _showScrollFab) {
+      setState(() => _showScrollFab = shouldShowFab);
+    }
     if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
       _loadMoreFeed();
     }
@@ -687,6 +692,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: brandBg,
+      floatingActionButton: _showScrollFab
+          ? FloatingActionButton.small(
+              onPressed: () => _openComposerSheet(),
+              backgroundColor: brandNavy,
+              foregroundColor: Colors.white,
+              elevation: 3,
+              tooltip: 'Buat Postingan',
+              child: const Icon(Icons.edit_outlined, size: 20),
+            )
+          : null,
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
@@ -955,10 +970,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(width: 8),
           InkWell(
             onTap: () => _openComposerSheet(pickImageImmediately: true),
-            borderRadius: BorderRadius.circular(10),
-            child: const Padding(
-              padding: EdgeInsets.all(6),
-              child: Icon(Icons.image_outlined, color: brandGreen, size: 22),
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: brandGreen.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: brandGreen.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.photo_library_outlined, color: brandGreen, size: 17),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Foto',
+                    style: caption.copyWith(
+                      color: brandGreen,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

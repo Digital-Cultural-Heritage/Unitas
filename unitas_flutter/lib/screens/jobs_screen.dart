@@ -1200,13 +1200,32 @@ class _JobsScreenState extends State<JobsScreen> {
                     decoration: BoxDecoration(color: dim3, borderRadius: BorderRadius.circular(99)),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Text('Lamar: $title', style: heading.copyWith(fontSize: 18)),
-                if (company.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(company, style: caption.copyWith(color: dim1)),
-                ],
                 const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Lamar: $title', style: heading.copyWith(fontSize: 18)),
+                          if (company.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(company, style: caption.copyWith(color: dim1)),
+                          ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetCtx),
+                      icon: const Icon(Icons.close, size: 20, color: dim1),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Tutup',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
 
                 // Upload PDF CV (kompres otomatis & maks 1 MB)
                 Text('Upload CV (PDF, kompres otomatis & maks 1 MB)', style: label),
@@ -1245,18 +1264,29 @@ class _JobsScreenState extends State<JobsScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: surface,
+                      color: pickedPdf != null
+                          ? brandNavy.withValues(alpha: 0.06)
+                          : brandNavy.withValues(alpha: 0.03),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: pickedPdf != null ? brandNavy : borderColor,
+                        color: pickedPdf != null ? brandNavy : brandNavy.withValues(alpha: 0.25),
+                        width: pickedPdf != null ? 1.4 : 1,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          pickedPdf != null ? Icons.picture_as_pdf : Icons.upload_file_outlined,
-                          color: brandNavy,
-                          size: 24,
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: brandNavy.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            pickedPdf != null ? Icons.picture_as_pdf : Icons.upload_file_outlined,
+                            color: brandNavy,
+                            size: 22,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -1286,6 +1316,18 @@ class _JobsScreenState extends State<JobsScreen> {
                                 : () => setSheetState(() {
                                       pickedPdf = null;
                                     }),
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: brandNavy,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Pilih File',
+                              style: label.copyWith(color: Colors.white, fontSize: 11),
+                            ),
                           ),
                       ],
                     ),
@@ -1299,8 +1341,10 @@ class _JobsScreenState extends State<JobsScreen> {
                   controller: linkCtrl,
                   enabled: !submitting,
                   keyboardType: TextInputType.url,
+                  style: body.copyWith(color: textPrimary, fontSize: 13.5),
                   decoration: InputDecoration(
                     hintText: 'https://drive.google.com/... atau linkedin.com/in/...',
+                    hintStyle: body.copyWith(color: dim2, fontSize: 13.5),
                     filled: true,
                     fillColor: surface,
                     border: OutlineInputBorder(
@@ -1322,8 +1366,10 @@ class _JobsScreenState extends State<JobsScreen> {
                   controller: noteCtrl,
                   enabled: !submitting,
                   maxLines: 3,
+                  style: body.copyWith(color: textPrimary, fontSize: 13.5),
                   decoration: InputDecoration(
                     hintText: 'Ceritakan singkat pengalamanmu atau alasan tertarik posisi ini…',
+                    hintStyle: body.copyWith(color: dim2, fontSize: 13.5),
                     filled: true,
                     fillColor: surface,
                     border: OutlineInputBorder(
@@ -1341,17 +1387,65 @@ class _JobsScreenState extends State<JobsScreen> {
                 if (applyUrl.isNotEmpty || contactEmail.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: brandGold.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: brandGold.withValues(alpha: 0.35)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Info Rekrutmen Resmi:', style: caption.copyWith(fontWeight: FontWeight.w600, color: brandNavy)),
-                        if (applyUrl.isNotEmpty) Text('Link: $applyUrl', style: caption),
-                        if (contactEmail.isNotEmpty) Text('Email: $contactEmail', style: caption),
+                        Text('Info Rekrutmen Resmi', style: caption.copyWith(fontWeight: FontWeight.w700, color: brandNavy)),
+                        if (applyUrl.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              const Icon(Icons.link, size: 15, color: brandNavy),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(applyUrl, style: caption.copyWith(color: textPrimary), overflow: TextOverflow.ellipsis),
+                              ),
+                              InkWell(
+                                onTap: () {
+                                  Clipboard.setData(ClipboardData(text: applyUrl));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Link lamaran disalin')),
+                                  );
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  child: Text('Salin', style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w700)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (contactEmail.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              const Icon(Icons.mail_outline, size: 15, color: brandNavy),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(contactEmail, style: caption.copyWith(color: textPrimary), overflow: TextOverflow.ellipsis),
+                              ),
+                              InkWell(
+                                onTap: () {
+                                  Clipboard.setData(ClipboardData(text: contactEmail));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Email rekruter disalin')),
+                                  );
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  child: Text('Salin', style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w700)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),

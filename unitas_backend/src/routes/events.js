@@ -176,12 +176,29 @@ router.post("/:id/register", requireAuth, async (req, res, next) => {
   try {
     const { id: eventId } = req.params;
     const userId = req.user.userId;
+    const body = req.body || {};
+
+    const attendee_name = typeof body.attendee_name === "string" ? body.attendee_name.trim() : null;
+    const attendee_email = typeof body.attendee_email === "string" ? body.attendee_email.trim() : null;
+    const attendee_phone = typeof body.attendee_phone === "string" ? body.attendee_phone.trim() : null;
+    const notes = typeof body.notes === "string" ? body.notes.trim() : null;
+
+    if (attendee_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(attendee_email)) {
+      return res.status(400).json({ error: "Format email tidak valid" });
+    }
 
     // Single INSERT; UNIQUE(event_id, user_id) makes this race-free and the
     // attendee_count trigger keeps the counter exact.
     const { data, error } = await supabase
       .from("event_registrations")
-      .insert({ event_id: eventId, user_id: userId })
+      .insert({
+        event_id: eventId,
+        user_id: userId,
+        attendee_name: attendee_name || null,
+        attendee_email: attendee_email || null,
+        attendee_phone: attendee_phone || null,
+        notes: notes || null,
+      })
       .select()
       .single();
     if (error) {
@@ -216,7 +233,7 @@ router.get("/:id/attendees", requireAuth, async (req, res, next) => {
     const { data, error } = await supabase
       .from("event_registrations")
       .select(`
-        id, registered_at,
+        id, registered_at, attendee_name, attendee_email, attendee_phone, notes,
         user:user_id(id, user_profiles(full_name, initials, avatar_url, prodi, angkatan))
       `)
       .eq("event_id", req.params.id)

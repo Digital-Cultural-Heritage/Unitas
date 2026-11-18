@@ -13,8 +13,27 @@ class EventsService {
   }
 
   // ── Register to event ──────────────────────────────────────────────────
-  static Future<void> register(String eventId) async {
-    await ApiClient.post('/api/events/$eventId/register');
+  static Future<void> register(
+    String eventId, {
+    String? attendeeName,
+    String? attendeeEmail,
+    String? attendeePhone,
+    String? notes,
+  }) async {
+    final body = <String, dynamic>{};
+    if (attendeeName != null && attendeeName.trim().isNotEmpty) {
+      body['attendee_name'] = attendeeName.trim();
+    }
+    if (attendeeEmail != null && attendeeEmail.trim().isNotEmpty) {
+      body['attendee_email'] = attendeeEmail.trim();
+    }
+    if (attendeePhone != null && attendeePhone.trim().isNotEmpty) {
+      body['attendee_phone'] = attendeePhone.trim();
+    }
+    if (notes != null && notes.trim().isNotEmpty) {
+      body['notes'] = notes.trim();
+    }
+    await ApiClient.post('/api/events/$eventId/register', body: body.isEmpty ? null : body);
   }
 
   // ── Unregister from event ──────────────────────────────────────────────

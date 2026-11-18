@@ -3,6 +3,8 @@ import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/events_service.dart';
 import '../core/api/api_client.dart';
+import '../core/api/auth_service.dart';
+import '../core/api/users_service.dart';
 import '../widgets/skeleton.dart';
 import 'create_event_screen.dart';
 import 'manage_event_screen.dart';
@@ -108,38 +110,322 @@ class _EventsScreenState extends State<EventsScreen> {
     }
   }
 
-  Future<void> _toggleReg(String id) async {
-    if (_toggling.contains(id)) return;
-    _toggling.add(id);
+  Future<void> _handleRegisterTap(Map<String, dynamic> ev) async {
+    final id = ev['id']?.toString() ?? '';
+    if (id.isEmpty || _toggling.contains(id)) return;
     final isReg = _registered.contains(id);
-    setState(() {
-      isReg ? _registered.remove(id) : _registered.add(id);
-    });
-    try {
-      if (isReg) {
+
+    if (isReg) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Batalkan Pendaftaran'),
+          content: Text('Yakin ingin membatalkan pendaftaran untuk "${ev['title'] ?? 'acara ini'}"?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Tetap Terdaftar')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Batalkan', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+
+      _toggling.add(id);
+      setState(() => _registered.remove(id));
+      try {
         await EventsService.unregister(id);
-      } else {
-        await EventsService.register(id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Pendaftaran acara dibatalkan')),
+          );
+          _load();
+        }
+      } on ApiException catch (e) {
+        if (mounted) {
+          setState(() => _registered.add(id));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() => _registered.add(id));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Gagal membatalkan pendaftaran')),
+          );
+        }
+      } finally {
+        _toggling.remove(id);
       }
-    } on ApiException catch (e) {
-      if (e.statusCode != 409 && mounted) {
-        setState(() {
-          isReg ? _registered.add(id) : _registered.remove(id);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          isReg ? _registered.add(id) : _registered.remove(id);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Gagal memperbarui pendaftaran')),
-        );
-      }
-    } finally {
-      _toggling.remove(id);
+      return;
     }
+
+    await _openRegisterSheet(ev);
+  }
+
+  Future<void> _openRegisterSheet(Map<String, dynamic> ev) async {
+    final id = ev['id']?.toString() ?? '';
+    final title = (ev['title'] ?? 'Acara Alumni').toString();
+    final category = (ev['category'] ?? 'Acara').toString();
+    final dateStr = _formatDate(ev['event_date']);
+    final loc = (ev['location'] ?? '').toString();
+
+    final stored = await AuthService.getStoredUser();
+    Map<String, dynamic>? me;
+    try {
+      me = await UsersService.getMe();
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    final nameCtrl = TextEditingController(
+      text: (me?['full_name'] ?? stored?['full_name'] ?? '').toString(),
+    );
+    final emailCtrl = TextEditingController(
+      text: (me?['email'] ?? stored?['email'] ?? '').toString(),
+    );
+    final phoneCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    bool submitting = false;
+    String? errorMsg;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              22,
+              16,
+              22,
+              MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: dim3, borderRadius: BorderRadius.circular(99)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(category.toUpperCase(), style: label.copyWith(color: brandNavy)),
+                          const SizedBox(height: 3),
+                          Text('Daftar: $title', style: heading.copyWith(fontSize: 18)),
+                          const SizedBox(height: 3),
+                          Text(
+                            [dateStr, loc].where((s) => s.isNotEmpty).join(' · '),
+                            style: caption.copyWith(color: dim1),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetCtx),
+                      icon: const Icon(Icons.close, size: 20, color: dim1),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Tutup',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+
+                Text('Nama Lengkap *', style: label),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: nameCtrl,
+                  enabled: !submitting,
+                  style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    hintText: 'Masukkan nama lengkap untuk sertifikat/absensi',
+                    hintStyle: body.copyWith(color: dim2, fontSize: 13.5),
+                    filled: true,
+                    fillColor: surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Text('Email *', style: label),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: emailCtrl,
+                  enabled: !submitting,
+                  keyboardType: TextInputType.emailAddress,
+                  style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    hintText: 'Email untuk info link acara / e-sertifikat',
+                    hintStyle: body.copyWith(color: dim2, fontSize: 13.5),
+                    filled: true,
+                    fillColor: surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Text('No. WhatsApp (opsional)', style: label),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: phoneCtrl,
+                  enabled: !submitting,
+                  keyboardType: TextInputType.phone,
+                  style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    hintText: 'Contoh: 081234567890',
+                    hintStyle: body.copyWith(color: dim2, fontSize: 13.5),
+                    filled: true,
+                    fillColor: surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Text('Catatan / Pertanyaan (opsional)', style: label),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: notesCtrl,
+                  enabled: !submitting,
+                  maxLines: 2,
+                  style: body.copyWith(color: textPrimary, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    hintText: 'Pertanyaan untuk pembicara atau catatan kehadiran…',
+                    hintStyle: body.copyWith(color: dim2, fontSize: 13.5),
+                    filled: true,
+                    fillColor: surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+
+                if (errorMsg != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errorMsg!, style: caption.copyWith(color: const Color(0xFFDC2626))),
+                ],
+
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: brandNavy,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    onPressed: submitting
+                        ? null
+                        : () async {
+                            final nama = nameCtrl.text.trim();
+                            final email = emailCtrl.text.trim();
+                            if (nama.isEmpty) {
+                              setSheet(() => errorMsg = 'Nama lengkap wajib diisi');
+                              return;
+                            }
+                            if (email.isEmpty || !email.contains('@')) {
+                              setSheet(() => errorMsg = 'Masukkan email yang valid');
+                              return;
+                            }
+                            setSheet(() {
+                              submitting = true;
+                              errorMsg = null;
+                            });
+                            try {
+                              await EventsService.register(
+                                id,
+                                attendeeName: nama,
+                                attendeeEmail: email,
+                                attendeePhone: phoneCtrl.text.trim(),
+                                notes: notesCtrl.text.trim(),
+                              );
+                              if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                              if (mounted) {
+                                setState(() => _registered.add(id));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Berhasil mendaftar di "$title"!')),
+                                );
+                                _load();
+                              }
+                            } on ApiException catch (e) {
+                              if (e.statusCode == 409) {
+                                if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                                if (mounted) setState(() => _registered.add(id));
+                              } else {
+                                setSheet(() {
+                                  submitting = false;
+                                  errorMsg = e.message;
+                                });
+                              }
+                            } catch (_) {
+                              setSheet(() {
+                                submitting = false;
+                                errorMsg = 'Gagal mendaftar acara. Coba lagi.';
+                              });
+                            }
+                          },
+                    child: submitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Text('Konfirmasi Pendaftaran', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   String _formatDate(dynamic iso) {
@@ -534,7 +820,7 @@ class _EventsScreenState extends State<EventsScreen> {
                     ),
                     const SizedBox(width: 8),
                     InkWell(
-                      onTap: () => _toggleReg(id),
+                      onTap: () => _handleRegisterTap(ev),
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),

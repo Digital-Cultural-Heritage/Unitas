@@ -212,18 +212,39 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
                                     p = Map<String, dynamic>.from(profile[0] as Map);
                                   }
 
-                                  final rawName = p['full_name']?.toString().trim() ?? '';
+                                  final rawName = (att['attendee_name'] ?? p['full_name'])?.toString().trim() ?? '';
                                   final name = rawName.isEmpty ? 'Alumni' : rawName;
                                   final rawInit = p['initials']?.toString().trim() ?? '';
                                   final initials = rawInit.isNotEmpty ? rawInit : name[0].toUpperCase();
                                   final prodi = p['prodi']?.toString().trim() ?? '';
                                   final angk = p['angkatan']?.toString().trim() ?? '';
-                                  final sub = [prodi, angk].where((e) => e.isNotEmpty).join(' ');
+                                  final email = (att['attendee_email'] ?? '').toString().trim();
+                                  final phone = (att['attendee_phone'] ?? '').toString().trim();
+                                  final notes = (att['notes'] ?? '').toString().trim();
+                                  final subParts = [
+                                    [prodi, angk].where((e) => e.isNotEmpty).join(' '),
+                                    if (email.isNotEmpty) email,
+                                    if (phone.isNotEmpty) phone,
+                                  ].where((e) => e.isNotEmpty).toList();
+                                  final sub = subParts.join(' · ');
 
                                   return ListTile(
                                     leading: UnitasAvatar(initials: initials, color: _colorFor(name), size: 40),
                                     title: Text(name, style: subTitle),
-                                    subtitle: Text(sub, style: caption),
+                                    subtitle: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (sub.isNotEmpty) Text(sub, style: caption),
+                                        if (notes.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 2),
+                                            child: Text(
+                                              'Catatan: $notes',
+                                              style: caption.copyWith(color: brandNavy),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                     tileColor: surface,
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                                   );
