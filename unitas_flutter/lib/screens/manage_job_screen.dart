@@ -186,9 +186,18 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
       appBar: AppBar(
         backgroundColor: surface,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: borderColor),
+        ),
         title: Text('Kelola Lowongan Saya', style: heading.copyWith(fontSize: 18)),
       ),
-      body: _loading
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: _loading
           ? const Center(child: CircularProgressIndicator())
           : _myJobs.isEmpty
               ? Center(
@@ -199,7 +208,7 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: _myJobs.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (_, i) {
                       final job = _myJobs[i];
                       final active = job['is_active'] != false;
@@ -269,6 +278,8 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
                     },
                   ),
                 ),
+        ),
+      ),
     );
   }
 }

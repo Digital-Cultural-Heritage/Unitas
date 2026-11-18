@@ -54,9 +54,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
       appBar: AppBar(
         backgroundColor: surface,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: borderColor),
+        ),
         title: Text('Pesan Alumni', style: heading.copyWith(fontSize: 18)),
       ),
-      body: _loading
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: _loading
           ? const Center(child: CircularProgressIndicator())
           : _conversations.isEmpty
               ? Center(
@@ -83,7 +92,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: _conversations.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (_, i) {
                       final c = _conversations[i];
                       final peer = c['peer'] as Map<String, dynamic>? ?? {};
@@ -173,6 +182,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     },
                   ),
                 ),
+        ),
+      ),
     );
   }
 }

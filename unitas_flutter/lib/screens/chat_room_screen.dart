@@ -35,6 +35,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _sending = false;
   Timer? _pollTimer;
 
+  static const _icebreakers = [
+    'Halo, salam kenal!',
+    'Boleh tanya soal karier / kerjaan?',
+    'Lagi sibuk apa sekarang?',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -78,13 +84,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  Future<void> _send() async {
-    final text = _msgCtrl.text.trim();
+  Future<void> _send([String? preset]) async {
+    final text = (preset ?? _msgCtrl.text).trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
       final sent = await MessagesService.sendMessage(widget.peerId, text);
-      _msgCtrl.clear();
+      if (preset == null) _msgCtrl.clear();
       if (mounted) {
         setState(() {
           _messages = [..._messages, sent];
@@ -119,6 +125,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return '$hh:$mm';
   }
 
+  String _dateKey(String? iso) {
+    if (iso == null) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
+    return '${dt.year}-${dt.month}-${dt.day}';
+  }
+
+  String _formatDateLabel(String? iso) {
+    if (iso == null) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(dt.year, dt.month, dt.day);
+    final diff = today.difference(target).inDays;
+    if (diff == 0) return 'Hari ini';
+    if (diff == 1) return 'Kemarin';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -126,7 +153,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       appBar: AppBar(
         backgroundColor: surface,
         elevation: 0,
+        scrolledUnderElevation: 0,
         titleSpacing: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: borderColor),
+        ),
         title: Row(
           children: [
             UnitasAvatar(
@@ -140,7 +172,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.peerName, style: subTitle.copyWith(fontSize: 15)),
+                  Text(
+                    widget.peerName,
+                    style: subTitle.copyWith(fontSize: 15),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   if (widget.peerSubtitle != null && widget.peerSubtitle!.isNotEmpty)
                     Text(
                       widget.peerSubtitle!,
@@ -157,64 +194,151 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       body: Column(
         children: [
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _messages.isEmpty
-                    ? Center(
-                        child: Text(
-                          'Kirim pesan pertama ke ${widget.peerName}',
-                          style: caption,
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: _scrollCtrl,
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _messages.length,
-                        itemBuilder: (_, i) {
-                          final m = _messages[i];
-                          final isMe = m['sender_id']?.toString() == _myId;
-                          return Align(
-                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              constraints: BoxConstraints(
-                                maxWidth: MediaQuery.of(context).size.width * 0.72,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isMe ? brandNavy : surface,
-                                borderRadius: BorderRadius.only(
-                                  topLeft: const Radius.circular(14),
-                                  topRight: const Radius.circular(14),
-                                  bottomLeft: Radius.circular(isMe ? 14 : 4),
-                                  bottomRight: Radius.circular(isMe ? 4 : 14),
-                                ),
-                                border: isMe ? null : Border.all(color: borderColor),
-                              ),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _messages.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    m['content']?.toString() ?? '',
-                                    style: body.copyWith(
-                                      color: isMe ? Colors.white : textPrimary,
-                                      fontSize: 14,
-                                    ),
+                                  UnitasAvatar(
+                                    initials: widget.peerInitials,
+                                    color: brandNavy,
+                                    size: 56,
+                                    avatarUrl: widget.peerAvatarUrl,
                                   ),
-                                  const SizedBox(height: 3),
+                                  const SizedBox(height: 12),
                                   Text(
-                                    _formatClock(m['created_at']?.toString()),
-                                    style: caption.copyWith(
-                                      fontSize: 10,
-                                      color: isMe ? Colors.white70 : dim2,
-                                    ),
+                                    'Mulai obrolan dengan ${widget.peerName}',
+                                    style: subTitle.copyWith(fontSize: 15),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Pilih sapaan cepat di bawah atau tulis pesan sendiri.',
+                                    style: caption,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    alignment: WrapAlignment.center,
+                                    children: _icebreakers
+                                        .map(
+                                          (text) => ActionChip(
+                                            label: Text(text, style: caption.copyWith(color: brandNavy)),
+                                            backgroundColor: surface,
+                                            side: const BorderSide(color: borderColor),
+                                            onPressed: () => _send(text),
+                                          ),
+                                        )
+                                        .toList(),
                                   ),
                                 ],
                               ),
                             ),
-                          );
-                        },
-                      ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollCtrl,
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                            itemCount: _messages.length,
+                            itemBuilder: (_, i) {
+                              final m = _messages[i];
+                              final isMe = m['sender_id']?.toString() == _myId;
+                              final isRead = m['is_read'] == true;
+                              final curDate = _dateKey(m['created_at']?.toString());
+                              final prevDate = i > 0 ? _dateKey(_messages[i - 1]['created_at']?.toString()) : '';
+                              final showDateHeader = i == 0 || curDate != prevDate;
+
+                              final prevSameSender = i > 0 &&
+                                  !showDateHeader &&
+                                  (_messages[i - 1]['sender_id']?.toString() == m['sender_id']?.toString());
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (showDateHeader)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      child: Center(
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: card,
+                                            borderRadius: BorderRadius.circular(99),
+                                          ),
+                                          child: Text(
+                                            _formatDateLabel(m['created_at']?.toString()),
+                                            style: caption.copyWith(fontSize: 11, fontWeight: FontWeight.w600),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  Align(
+                                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                    child: Container(
+                                      margin: EdgeInsets.only(bottom: prevSameSender ? 4 : 10),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      constraints: const BoxConstraints(maxWidth: 420),
+                                      decoration: BoxDecoration(
+                                        color: isMe ? brandNavy : surface,
+                                        borderRadius: BorderRadius.only(
+                                          topLeft: const Radius.circular(16),
+                                          topRight: const Radius.circular(16),
+                                          bottomLeft: Radius.circular(isMe ? 16 : 4),
+                                          bottomRight: Radius.circular(isMe ? 4 : 16),
+                                        ),
+                                        border: isMe ? null : Border.all(color: borderColor),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            m['content']?.toString() ?? '',
+                                            style: body.copyWith(
+                                              color: isMe ? Colors.white : textPrimary,
+                                              fontSize: 14,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                _formatClock(m['created_at']?.toString()),
+                                                style: caption.copyWith(
+                                                  fontSize: 10,
+                                                  color: isMe ? Colors.white70 : dim2,
+                                                ),
+                                              ),
+                                              if (isMe) ...[
+                                                const SizedBox(width: 4),
+                                                Icon(
+                                                  isRead ? Icons.done_all : Icons.done,
+                                                  size: 13,
+                                                  color: isRead ? brandGold : Colors.white60,
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+              ),
+            ),
           ),
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
@@ -224,39 +348,47 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
             child: SafeArea(
               top: false,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _msgCtrl,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      decoration: InputDecoration(
-                        hintText: 'Tulis pesan…',
-                        hintStyle: caption,
-                        filled: true,
-                        fillColor: card,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _msgCtrl,
+                          minLines: 1,
+                          maxLines: 4,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          decoration: InputDecoration(
+                            hintText: 'Tulis pesan…',
+                            hintStyle: caption,
+                            filled: true,
+                            fillColor: card,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(22),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: _sending ? null : () => _send(),
+                        style: IconButton.styleFrom(backgroundColor: brandNavy),
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.send, color: Colors.white, size: 20),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _send,
-                    style: IconButton.styleFrom(backgroundColor: brandNavy),
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.send, color: Colors.white, size: 20),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

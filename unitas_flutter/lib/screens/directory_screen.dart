@@ -8,7 +8,8 @@ import '../widgets/skeleton.dart';
 import 'chat_room_screen.dart';
 
 class DirectoryScreen extends StatefulWidget {
-  const DirectoryScreen({super.key});
+  final int refreshTrigger;
+  const DirectoryScreen({super.key, this.refreshTrigger = 0});
   @override
   State<DirectoryScreen> createState() => _DirectoryScreenState();
 }
@@ -33,6 +34,14 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant DirectoryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshTrigger != oldWidget.refreshTrigger) {
+      _load();
+    }
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
@@ -42,12 +51,13 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     setState(() { _loading = true; _error = null; });
     try {
       final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
-      final isOnline = _filter == 'Terhubung' ? true : null;
       var data = await UsersService.getDirectory(
-        q: _q, kota: kota, isOnline: isOnline,
+        q: _q, kota: kota,
       );
-      // Filter "Lainnya" = bukan Jakarta
-      if (_filter == 'Lainnya') {
+      if (_filter == 'Terhubung') {
+        data = data.where((a) => a['connection_status'] == 'accepted').toList();
+      } else if (_filter == 'Lainnya') {
+        // Filter "Lainnya" = bukan Jakarta
         data = data.where((a) => (a['kota'] ?? '') != 'Jakarta').toList();
       }
 

@@ -152,13 +152,11 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   int _homeRefreshTick = 0;
+  int _directoryRefreshTick = 0;
 
-  late final List<Widget> _otherScreens = [
-    const DirectoryScreen(),
-    const EventsScreen(),
-    const JobsScreen(),
-    ProfileScreen(onLogout: widget.onLogout),
-  ];
+  late final Widget _eventsScreen = const EventsScreen();
+  late final Widget _jobsScreen = const JobsScreen();
+  late final Widget _profileScreen = ProfileScreen(onLogout: widget.onLogout);
 
   final List<_NavItem> _navItems = const [
     _NavItem(icon: Icons.home_outlined,           activeIcon: Icons.home,           label: 'Beranda'),
@@ -177,11 +175,18 @@ class _MainShellState extends State<MainShell> {
         children: [
           HomeScreen(
             refreshTrigger: _homeRefreshTick,
-            onOpenDirectory: () => setState(() => _currentIndex = 1),
+            onOpenDirectory: () => setState(() {
+              _directoryRefreshTick++;
+              _currentIndex = 1;
+            }),
             onOpenEvents: () => setState(() => _currentIndex = 2),
             onOpenJobs: () => setState(() => _currentIndex = 3),
+            onOpenProfile: () => setState(() => _currentIndex = 4),
           ),
-          ..._otherScreens,
+          DirectoryScreen(refreshTrigger: _directoryRefreshTick),
+          _eventsScreen,
+          _jobsScreen,
+          _profileScreen,
         ],
       ),
       bottomNavigationBar: Container(
@@ -201,6 +206,8 @@ class _MainShellState extends State<MainShell> {
                   onTap: () => setState(() {
                     if (i == 0 && _currentIndex != 0) {
                       _homeRefreshTick++;
+                    } else if (i == 1 && _currentIndex != 1) {
+                      _directoryRefreshTick++;
                     }
                     _currentIndex = i;
                   }),

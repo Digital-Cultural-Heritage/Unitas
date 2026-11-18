@@ -314,6 +314,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         );
                       }).toList()),
+                      _buildProfileCompletionBanner(),
                       const SizedBox(height: 20),
                       // Tabs
                       Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
@@ -345,6 +346,68 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileCompletionBanner() {
+    if (_profile == null) return const SizedBox.shrink();
+    final fields = <String, String>{
+      'Foto': (_profile?['avatar_url'] ?? '').toString().trim(),
+      'Bio': (_profile?['bio'] ?? '').toString().trim(),
+      'Pekerjaan': (_profile?['pekerjaan'] ?? '').toString().trim(),
+      'Perusahaan': (_profile?['perusahaan'] ?? '').toString().trim(),
+      'Kota': (_profile?['kota'] ?? '').toString().trim(),
+      'LinkedIn': (_profile?['linkedin'] ?? '').toString().trim(),
+    };
+    final filled = fields.values.where((v) => v.isNotEmpty).length;
+    if (filled >= fields.length) return const SizedBox.shrink();
+    final pct = ((filled / fields.length) * 100).round();
+    final missing = fields.entries.where((e) => e.value.isEmpty).map((e) => e.key).take(3).join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: InkWell(
+        onTap: _openEditProfile,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: brandGold.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: brandGold.withValues(alpha: 0.45)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.auto_awesome_outlined, size: 16, color: brandNavy),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Kelengkapan Profil ($pct%)',
+                      style: subTitle.copyWith(fontSize: 13),
+                    ),
+                  ),
+                  Text('Lengkapi →', style: label.copyWith(color: brandNavy)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(
+                  value: filled / fields.length,
+                  minHeight: 5,
+                  color: brandNavy,
+                  backgroundColor: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text('Belum diisi: $missing', style: caption.copyWith(fontSize: 11)),
+            ],
+          ),
         ),
       ),
     );

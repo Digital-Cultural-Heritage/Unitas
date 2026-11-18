@@ -179,7 +179,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       body: Column(
         children: [
           Expanded(
-            child: ListView(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 // Post Original
@@ -266,6 +270,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   }).toList(),
               ],
             ),
+              ),
+            ),
           ),
           
           // Comment input
@@ -276,25 +282,30 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               border: Border(top: BorderSide(color: borderColor)),
             ),
             child: SafeArea(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _commentCtrl,
-                      decoration: InputDecoration(
-                        hintText: 'Tulis komentar...',
-                        hintStyle: body.copyWith(color: dim2),
-                        border: InputBorder.none,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _commentCtrl,
+                          decoration: InputDecoration(
+                            hintText: 'Tulis komentar...',
+                            hintStyle: body.copyWith(color: dim2),
+                            border: InputBorder.none,
+                          ),
+                        ),
                       ),
-                    ),
+                      IconButton(
+                        icon: _submitting 
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
+                          : const Icon(Icons.send, color: brandNavy),
+                        onPressed: _submitting ? null : _submitComment,
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: _submitting 
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
-                      : const Icon(Icons.send, color: brandNavy),
-                    onPressed: _submitting ? null : _submitComment,
-                  ),
-                ],
+                ),
               ),
             ),
           ),

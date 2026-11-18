@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/posts_service.dart';
@@ -24,12 +25,14 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback? onOpenEvents;
   final VoidCallback? onOpenDirectory;
   final VoidCallback? onOpenJobs;
+  final VoidCallback? onOpenProfile;
   const HomeScreen({
     super.key,
     this.refreshTrigger = 0,
     this.onOpenEvents,
     this.onOpenDirectory,
     this.onOpenJobs,
+    this.onOpenProfile,
   });
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -530,13 +533,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: brandBg,
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openComposerSheet(),
-        backgroundColor: brandNavy,
-        foregroundColor: Colors.white,
-        elevation: 3,
-        child: const Icon(Icons.edit_outlined, size: 22),
-      ),
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
@@ -670,11 +666,18 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          UnitasAvatar(
-            initials: initials,
-            color: _colorFor(_me?['id'] ?? 'me'),
-            size: 36,
-            avatarUrl: _avatarWithVersion(_me?['avatar_url']),
+          Tooltip(
+            message: 'Profil Saya',
+            child: InkWell(
+              onTap: widget.onOpenProfile,
+              borderRadius: BorderRadius.circular(99),
+              child: UnitasAvatar(
+                initials: initials,
+                color: _colorFor(_me?['id'] ?? 'me'),
+                size: 36,
+                avatarUrl: _avatarWithVersion(_me?['avatar_url']),
+              ),
+            ),
           ),
         ],
       ),
@@ -744,7 +747,27 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
-          child: Text('Sorotan Acara & Karier', style: label),
+          child: Row(
+            children: [
+              Text('Sorotan Acara & Karier', style: label),
+              const Spacer(),
+              InkWell(
+                onTap: widget.onOpenEvents,
+                child: Text(
+                  'Acara',
+                  style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600, fontSize: 11.5),
+                ),
+              ),
+              Text(' · ', style: caption),
+              InkWell(
+                onTap: widget.onOpenJobs,
+                child: Text(
+                  'Karier',
+                  style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600, fontSize: 11.5),
+                ),
+              ),
+            ],
+          ),
         ),
         SizedBox(
           height: 112,
@@ -752,6 +775,14 @@ class _HomeScreenState extends State<HomeScreen> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 18),
             children: [
+              ..._upcomingEvents.map((ev) => Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: _highlightEventCard(ev),
+              )),
+              ..._latestJobs.map((job) => Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: _highlightJobCard(job),
+              )),
               InkWell(
                 onTap: widget.onOpenDirectory,
                 borderRadius: BorderRadius.circular(14),
@@ -787,14 +818,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   accent: brandNavy,
                 ),
               ),
-              ..._upcomingEvents.map((ev) => Padding(
-                padding: const EdgeInsets.only(left: 10),
-                child: _highlightEventCard(ev),
-              )),
-              ..._latestJobs.map((job) => Padding(
-                padding: const EdgeInsets.only(left: 10),
-                child: _highlightJobCard(job),
-              )),
             ],
           ),
         ),
@@ -810,7 +833,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final companyMeta = [company, location].where((s) => s.isNotEmpty).join(' • ');
 
     return InkWell(
-      onTap: widget.onOpenJobs,
+      onTap: () => _openJobDetailSheet(job),
       borderRadius: BorderRadius.circular(14),
       child: Container(
         width: 186,
@@ -871,7 +894,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final dateBadge = dt != null ? '${dt.day} ${months[dt.month - 1]}' : 'ACARA';
 
     return InkWell(
-      onTap: widget.onOpenEvents,
+      onTap: () => _openEventDetailSheet(ev),
       borderRadius: BorderRadius.circular(14),
       child: Container(
         width: 186,
@@ -1020,7 +1043,13 @@ class _HomeScreenState extends State<HomeScreen> {
             final id = post['id']?.toString() ?? '$i';
             final profile = _profile(post);
             final name = profile['full_name'] ?? 'Alumni';
-            final prodi = profile['prodi'] ?? '';
+            final prodiRaw = (profile['prodi'] ?? '').toString().trim();
+            final prodi = prodiRaw.isEmpty
+                ? ''
+                : prodiRaw
+                    .split(RegExp(r'\s+'))
+                    .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
+                    .join(' ');
             final angk = profile['angkatan'] ?? '';
             final initials = _initials(post);
             final rawLikes = (post['likes_count'] as num?)?.toInt() ?? 0;
@@ -1029,7 +1058,7 @@ class _HomeScreenState extends State<HomeScreen> {
             final comments = rawComments < 0 ? 0 : rawComments;
             final liked = _likedMap[id] ?? false;
             final metaLine = [
-              if (prodi.toString().isNotEmpty) prodi,
+              if (prodi.isNotEmpty) prodi,
               if (angk.toString().isNotEmpty) angk,
               _timeAgo(post['created_at']),
             ].where((s) => s.toString().isNotEmpty).join(' · ');
@@ -1063,18 +1092,24 @@ class _HomeScreenState extends State<HomeScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
                         child: Row(
                           children: [
-                            UnitasAvatar(
-                              initials: initials,
-                              color: _colorFor(post['user_id'] ?? name),
-                              size: 40,
-                              avatarUrl: _avatarWithVersion(profile['avatar_url']),
+                            GestureDetector(
+                              onTap: () => _openAuthorProfileSheet(post, prodi, angk),
+                              child: UnitasAvatar(
+                                initials: initials,
+                                color: _colorFor(post['user_id'] ?? name),
+                                size: 40,
+                                avatarUrl: _avatarWithVersion(profile['avatar_url']),
+                              ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(name, style: subTitle.copyWith(fontSize: 15)),
+                              child: GestureDetector(
+                                onTap: () => _openAuthorProfileSheet(post, prodi, angk),
+                                behavior: HitTestBehavior.opaque,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(name, style: subTitle.copyWith(fontSize: 15)),
                                   const SizedBox(height: 1),
                                   Row(
                                     children: [
@@ -1090,6 +1125,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ],
                                   ),
                                 ],
+                                ),
                               ),
                             ),
                             if (_isMyPost(post))
@@ -1136,14 +1172,19 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: body.copyWith(height: 1.45, color: textPrimary, fontSize: 14.5),
                           ),
                         ),
-                      // Gambar full-bleed (mentok kiri-kanan)
                       if (post['image_url'] != null)
-                        Image.network(
-                          post['image_url'],
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, _, _) => const SizedBox(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(
+                              post['image_url'],
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, _, _) => const SizedBox(),
+                            ),
+                          ),
                         ),
                       // Baris aksi (Like, Komentar, Share)
                       Padding(
@@ -1194,9 +1235,19 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                             const Spacer(),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                              child: Icon(Icons.share_outlined, color: dim1, size: 19),
+                            InkWell(
+                              onTap: () {
+                                final shareText = '$name ($metaLine):\n${post['content'] ?? ''}';
+                                Clipboard.setData(ClipboardData(text: shareText.trim()));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Postingan disalin ke clipboard')),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                child: Icon(Icons.share_outlined, color: dim1, size: 19),
+                              ),
                             ),
                           ],
                         ),
@@ -1209,6 +1260,165 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }),
       ],
+    );
+  }
+
+  void _openEventDetailSheet(Map<String, dynamic> ev) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text((ev['category'] ?? 'Acara Alumni').toString(), style: label.copyWith(color: brandNavy)),
+            const SizedBox(height: 6),
+            Text((ev['title'] ?? 'Acara Alumni').toString(), style: heading.copyWith(fontSize: 19)),
+            const SizedBox(height: 8),
+            Text(
+              '${ev['event_date'] ?? ''} · ${ev['location'] ?? ''}',
+              style: caption,
+            ),
+            if ((ev['description'] ?? '').toString().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(ev['description'].toString(), style: body, maxLines: 4, overflow: TextOverflow.ellipsis),
+            ],
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: brandNavy),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  widget.onOpenEvents?.call();
+                },
+                child: const Text('Lihat di Tab Acara'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openJobDetailSheet(Map<String, dynamic> job) {
+    final applyUrl = (job['apply_url'] ?? '').toString().trim();
+    final contactEmail = (job['contact_email'] ?? '').toString().trim();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text((job['job_type'] ?? 'Full-time').toString(), style: label.copyWith(color: brandNavy)),
+            const SizedBox(height: 6),
+            Text((job['title'] ?? 'Lowongan Kerja').toString(), style: heading.copyWith(fontSize: 19)),
+            const SizedBox(height: 6),
+            Text(
+              '${job['company'] ?? ''} · ${job['location'] ?? ''}',
+              style: caption,
+            ),
+            if ((job['description'] ?? '').toString().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(job['description'].toString(), style: body, maxLines: 4, overflow: TextOverflow.ellipsis),
+            ],
+            if (applyUrl.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text('Link: $applyUrl', style: caption.copyWith(color: brandNavy)),
+            ],
+            if (contactEmail.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('Email: $contactEmail', style: caption.copyWith(color: brandNavy)),
+            ],
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: brandNavy),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  widget.onOpenJobs?.call();
+                },
+                child: const Text('Buka Bursa Karier'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openAuthorProfileSheet(Map<String, dynamic> post, String prodi, dynamic angkatan) {
+    final profile = _profile(post);
+    final name = (profile['full_name'] ?? 'Alumni').toString();
+    final ini = _initials(post);
+    final isMine = _isMyPost(post);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                UnitasAvatar(
+                  initials: ini,
+                  color: _colorFor(post['user_id'] ?? name),
+                  size: 52,
+                  avatarUrl: _avatarWithVersion(profile['avatar_url']),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: heading.copyWith(fontSize: 18)),
+                      const SizedBox(height: 3),
+                      Text(
+                        [prodi, angkatan?.toString() ?? ''].where((s) => s.isNotEmpty).join(' · '),
+                        style: caption,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: brandNavy),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  if (isMine) {
+                    widget.onOpenProfile?.call();
+                  } else {
+                    widget.onOpenDirectory?.call();
+                  }
+                },
+                child: Text(isMine ? 'Buka Profil Saya' : 'Lihat di Direktori Alumni'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
