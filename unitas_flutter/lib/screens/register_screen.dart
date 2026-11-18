@@ -38,11 +38,11 @@ InputDecoration authInputDecoration(
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
-      borderSide: const BorderSide(color: borderColor),
+      borderSide: BorderSide(color: borderColor),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
-      borderSide: const BorderSide(color: borderColor),
+      borderSide: BorderSide(color: borderColor),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
@@ -106,12 +106,12 @@ class GoogleContinueButton extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Expanded(child: Divider(color: borderColor, height: 1)),
+            Expanded(child: Divider(color: borderColor, height: 1)),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text('atau', style: caption.copyWith(color: dim2)),
             ),
-            const Expanded(child: Divider(color: borderColor, height: 1)),
+            Expanded(child: Divider(color: borderColor, height: 1)),
           ],
         ),
         const SizedBox(height: 16),
@@ -121,7 +121,7 @@ class GoogleContinueButton extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: brandNavy,
-              side: const BorderSide(color: borderColor),
+              side: BorderSide(color: borderColor),
               padding: const EdgeInsets.symmetric(vertical: 13),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),

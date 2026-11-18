@@ -932,7 +932,7 @@ class _JobsScreenState extends State<JobsScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.wifi_off_rounded, color: dim2, size: 36),
+          Icon(Icons.wifi_off_rounded, color: dim2, size: 36),
           const SizedBox(height: 12),
           Text('Gagal memuat lowongan', style: subTitle.copyWith(fontSize: 16)),
           const SizedBox(height: 6),
@@ -1110,7 +1110,7 @@ class _JobsScreenState extends State<JobsScreen> {
                             const Icon(Icons.email_outlined, size: 16, color: brandNavy),
                             const SizedBox(width: 6),
                             Expanded(child: Text(contactEmail, style: caption.copyWith(color: brandNavy))),
-                            const Icon(Icons.copy, size: 14, color: dim2),
+                            Icon(Icons.copy, size: 14, color: dim2),
                           ],
                         ),
                       ),
@@ -1219,7 +1219,7 @@ class _JobsScreenState extends State<JobsScreen> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(sheetCtx),
-                      icon: const Icon(Icons.close, size: 20, color: dim1),
+                      icon: Icon(Icons.close, size: 20, color: dim1),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       tooltip: 'Tutup',
@@ -1311,7 +1311,7 @@ class _JobsScreenState extends State<JobsScreen> {
                         ),
                         if (pickedPdf != null)
                           IconButton(
-                            icon: const Icon(Icons.close, size: 18, color: dim2),
+                            icon: Icon(Icons.close, size: 18, color: dim2),
                             onPressed: submitting
                                 ? null
                                 : () => setSheetState(() {

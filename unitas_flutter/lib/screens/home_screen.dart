@@ -744,7 +744,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                         child: Column(
                           children: [
-                            const Icon(Icons.error_outline, color: dim2, size: 36),
+                            Icon(Icons.error_outline, color: dim2, size: 36),
                             const SizedBox(height: 10),
                             Text(_feedError!, style: subTitle),
                             const SizedBox(height: 10),

@@ -421,7 +421,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -592,7 +592,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ),
                               ],
                             ),
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.symmetric(vertical: 14),
                               child: Divider(height: 1, thickness: 1, color: borderColor),
                             ),
@@ -648,7 +648,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               Padding(
                                 padding: const EdgeInsets.only(left: 38),
                                 child: Container(
-                                  decoration: const BoxDecoration(
+                                  decoration: BoxDecoration(
                                     border: Border(left: BorderSide(color: borderColor, width: 1.5)),
                                   ),
                                   padding: const EdgeInsets.only(left: 12),
@@ -698,7 +698,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
           // Reply indicator + Comment input
           Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: surface,
               border: Border(top: BorderSide(color: borderColor)),
             ),
@@ -725,7 +725,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                               InkWell(
                                 onTap: _cancelReply,
-                                child: const Icon(Icons.close, size: 16, color: dim1),
+                                child: Icon(Icons.close, size: 16, color: dim1),
                               ),
                             ],
                           ),

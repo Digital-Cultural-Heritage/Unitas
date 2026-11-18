@@ -238,7 +238,7 @@ class _EventsScreenState extends State<EventsScreen> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(sheetCtx),
-                      icon: const Icon(Icons.close, size: 20, color: dim1),
+                      icon: Icon(Icons.close, size: 20, color: dim1),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       tooltip: 'Tutup',
@@ -260,11 +260,11 @@ class _EventsScreenState extends State<EventsScreen> {
                     fillColor: surface,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
@@ -285,11 +285,11 @@ class _EventsScreenState extends State<EventsScreen> {
                     fillColor: surface,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
@@ -310,11 +310,11 @@ class _EventsScreenState extends State<EventsScreen> {
                     fillColor: surface,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
@@ -335,11 +335,11 @@ class _EventsScreenState extends State<EventsScreen> {
                     fillColor: surface,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: borderColor),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     contentPadding: const EdgeInsets.all(12),
                   ),
@@ -477,7 +477,7 @@ class _EventsScreenState extends State<EventsScreen> {
               constraints: const BoxConstraints(maxWidth: 600),
               child: Column(
                 children: [
-                  const SizedBox(
+                  SizedBox(
                     height: 34,
                     child: TabBar(
                       labelColor: brandNavy,
@@ -593,7 +593,7 @@ class _EventsScreenState extends State<EventsScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline, color: dim2, size: 36),
+          Icon(Icons.error_outline, color: dim2, size: 36),
           const SizedBox(height: 12),
           Text(message, style: subTitle.copyWith(fontSize: 15), textAlign: TextAlign.center),
           const SizedBox(height: 16),
@@ -1297,7 +1297,7 @@ class _EventsScreenState extends State<EventsScreen> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(sheetCtx),
-                      icon: const Icon(Icons.close, size: 20, color: dim1),
+                      icon: Icon(Icons.close, size: 20, color: dim1),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       tooltip: 'Tutup',
@@ -1431,7 +1431,7 @@ class _EventsScreenState extends State<EventsScreen> {
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        side: isReg ? const BorderSide(color: borderColor) : BorderSide.none,
+                        side: isReg ? BorderSide(color: borderColor) : BorderSide.none,
                       ),
                     ),
                     onPressed: () {

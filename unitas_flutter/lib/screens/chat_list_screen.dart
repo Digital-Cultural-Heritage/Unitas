@@ -152,7 +152,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -171,7 +171,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.wifi_off_rounded, size: 44, color: dim2),
+                            Icon(Icons.wifi_off_rounded, size: 44, color: dim2),
                             const SizedBox(height: 12),
                             Text('Gagal memuat percakapan', style: subTitle.copyWith(color: dim1)),
                             const SizedBox(height: 4),
@@ -196,7 +196,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.chat_bubble_outline, size: 48, color: dim2),
+                            Icon(Icons.chat_bubble_outline, size: 48, color: dim2),
                             const SizedBox(height: 12),
                             Text('Belum ada koneksi untuk diajak ngobrol', style: subTitle.copyWith(color: dim1)),
                             const SizedBox(height: 4),
@@ -234,10 +234,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                       decoration: InputDecoration(
                                         hintText: 'Cari nama alumni…',
                                         hintStyle: caption,
-                                        prefixIcon: const Icon(Icons.search, color: dim2, size: 18),
+                                        prefixIcon: Icon(Icons.search, color: dim2, size: 18),
                                         suffixIcon: _query.isNotEmpty
                                             ? IconButton(
-                                                icon: const Icon(Icons.close, size: 17, color: dim2),
+                                                icon: Icon(Icons.close, size: 17, color: dim2),
                                                 onPressed: () {
                                                   _searchCtrl.clear();
                                                   setState(() => _query = '');
@@ -457,7 +457,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                                     ),
                                                   )
                                                 else
-                                                  const Icon(Icons.chevron_right, size: 16, color: dim2),
+                                                  Icon(Icons.chevron_right, size: 16, color: dim2),
                                               ],
                                             ),
                                           ],

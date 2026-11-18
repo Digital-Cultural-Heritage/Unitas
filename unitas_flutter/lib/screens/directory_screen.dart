@@ -295,7 +295,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                         const SizedBox(height: 3),
                         Row(
                           children: [
-                            const Icon(Icons.location_on_outlined, size: 13, color: dim2),
+                            Icon(Icons.location_on_outlined, size: 13, color: dim2),
                             const SizedBox(width: 3),
                             Text(kota, style: caption),
                           ],
@@ -463,7 +463,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.schedule_outlined, size: 14, color: dim1),
+            Icon(Icons.schedule_outlined, size: 14, color: dim1),
             const SizedBox(width: 4),
             Text(
               'Terkirim',
@@ -577,7 +577,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                         ),
                       if (kota.isNotEmpty) ...[
                         if (badgeText.isNotEmpty) const SizedBox(width: 8),
-                        const Icon(Icons.location_on_outlined, size: 12, color: dim2),
+                        Icon(Icons.location_on_outlined, size: 12, color: dim2),
                         const SizedBox(width: 2),
                         Flexible(child: Text(kota, style: caption, overflow: TextOverflow.ellipsis)),
                       ],
@@ -653,12 +653,12 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                             border: InputBorder.none,
                             hintText: 'Cari nama atau jurusan…',
                             hintStyle: body.copyWith(color: dim2),
-                            icon: const Icon(Icons.search, color: dim2, size: 18),
+                            icon: Icon(Icons.search, color: dim2, size: 18),
                             suffixIcon: ValueListenableBuilder<TextEditingValue>(
                               valueListenable: _searchCtrl,
                               builder: (_, val, _) => val.text.isNotEmpty
                                   ? IconButton(
-                                      icon: const Icon(Icons.close, size: 18, color: dim2),
+                                      icon: Icon(Icons.close, size: 18, color: dim2),
                                       onPressed: () {
                                         _searchDebounce?.cancel();
                                         _searchCtrl.clear();
@@ -722,7 +722,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                         ),
                         child: Column(
                           children: [
-                            const Icon(Icons.error_outline, color: dim2, size: 32),
+                            Icon(Icons.error_outline, color: dim2, size: 32),
                             const SizedBox(height: 8),
                             Text(_error!, style: caption.copyWith(color: dim1), textAlign: TextAlign.center),
                             const SizedBox(height: 12),

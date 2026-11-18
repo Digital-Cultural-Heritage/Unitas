@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
@@ -137,8 +137,8 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
     final avatarUrl = p['avatar_url']?.toString().trim();
     final points = (p['points'] ?? 0).toString();
 
-    final jobLine = [pekerjaan, perusahaan].where((e) => e.isNotEmpty).join(' · ');
-    final eduLine = [prodi, angkatan].where((e) => e.isNotEmpty).join(' · ');
+    final jobLine = [pekerjaan, perusahaan].where((e) => e.isNotEmpty).join(' Â· ');
+    final eduLine = [prodi, angkatan].where((e) => e.isNotEmpty).join(' Â· ');
 
     final isConnected = _connStatus == 'accepted';
     final isPending = _connStatus == 'pending';
@@ -150,7 +150,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
         backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -169,7 +169,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                     padding: const EdgeInsets.all(32),
                     children: [
                       const SizedBox(height: 80),
-                      const Icon(Icons.error_outline, size: 42, color: dim2),
+                      Icon(Icons.error_outline, size: 42, color: dim2),
                       const SizedBox(height: 12),
                       Text(_error!, style: subTitle, textAlign: TextAlign.center),
                       const SizedBox(height: 16),
@@ -210,7 +210,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                       ),
                       Positioned.fill(
                         child: Container(
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
@@ -299,7 +299,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(10),
                                           side: (isConnected || isPending)
-                                              ? const BorderSide(color: borderColor)
+                                              ? BorderSide(color: borderColor)
                                               : BorderSide.none,
                                         ),
                                         elevation: 0,
@@ -374,8 +374,8 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                           // Stats row (seragam dengan ProfileScreen)
                           Row(
                             children: [
-                              _statBox(Icons.school_outlined, angkatan.isNotEmpty ? angkatan : '—', 'Angkatan', isFirst: true),
-                              _statBox(Icons.location_on_outlined, kota.isNotEmpty ? kota : '—', 'Kota'),
+                              _statBox(Icons.school_outlined, angkatan.isNotEmpty ? angkatan : 'â€”', 'Angkatan', isFirst: true),
+                              _statBox(Icons.location_on_outlined, kota.isNotEmpty ? kota : 'â€”', 'Kota'),
                               _statBox(Icons.star_outline, points, 'Poin', isLast: true),
                             ],
                           ),
@@ -433,7 +433,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 12),
-                                _infoRow(Icons.school_outlined, 'Program Studi', prodi.isNotEmpty ? prodi : '—'),
+                                _infoRow(Icons.school_outlined, 'Program Studi', prodi.isNotEmpty ? prodi : 'â€”'),
                                 _infoRow(Icons.work_outline, 'Pekerjaan', pekerjaan.isNotEmpty ? pekerjaan : 'Belum diisi'),
                                 _infoRow(Icons.business_outlined, 'Perusahaan', perusahaan.isNotEmpty ? perusahaan : 'Belum diisi'),
                                 _infoRow(Icons.location_on_outlined, 'Kota', kota.isNotEmpty ? kota : 'Belum diisi'),
@@ -471,10 +471,10 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
         decoration: BoxDecoration(
           color: surface,
           border: Border(
-            top: const BorderSide(color: borderColor),
-            bottom: const BorderSide(color: borderColor),
-            left: const BorderSide(color: borderColor),
-            right: isLast ? const BorderSide(color: borderColor) : BorderSide.none,
+            top: BorderSide(color: borderColor),
+            bottom: BorderSide(color: borderColor),
+            left: BorderSide(color: borderColor),
+            right: isLast ? BorderSide(color: borderColor) : BorderSide.none,
           ),
           borderRadius: BorderRadius.horizontal(
             left: isFirst ? const Radius.circular(12) : Radius.zero,

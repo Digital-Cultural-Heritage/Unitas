@@ -223,7 +223,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         elevation: 0,
         scrolledUnderElevation: 0,
         titleSpacing: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -275,7 +275,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.wifi_off_rounded, size: 40, color: dim2),
+                                  Icon(Icons.wifi_off_rounded, size: 40, color: dim2),
                                   const SizedBox(height: 12),
                                   Text('Gagal memuat pesan', style: subTitle),
                                   const SizedBox(height: 4),
@@ -328,7 +328,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                                           (text) => ActionChip(
                                             label: Text(text, style: caption.copyWith(color: brandNavy)),
                                             backgroundColor: surface,
-                                            side: const BorderSide(color: borderColor),
+                                            side: BorderSide(color: borderColor),
                                             onPressed: () => _send(text),
                                           ),
                                         )
@@ -435,7 +435,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           ),
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: surface,
               border: Border(top: BorderSide(color: borderColor)),
             ),

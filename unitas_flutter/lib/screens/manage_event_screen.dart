@@ -173,7 +173,7 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
                       Expanded(child: Text('Edit Acara', style: heading.copyWith(fontSize: 18))),
                       IconButton(
                         onPressed: saving ? null : () => Navigator.pop(sheetCtx, false),
-                        icon: const Icon(Icons.close, size: 20, color: dim1),
+                        icon: Icon(Icons.close, size: 20, color: dim1),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -471,7 +471,7 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
         backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -530,7 +530,7 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
                                 padding: const EdgeInsets.all(32),
                                 child: Column(
                                   children: [
-                                    const Icon(Icons.error_outline, size: 36, color: dim2),
+                                    Icon(Icons.error_outline, size: 36, color: dim2),
                                     const SizedBox(height: 10),
                                     Text(_error!, style: caption, textAlign: TextAlign.center),
                                     const SizedBox(height: 12),
@@ -644,7 +644,7 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
                                             ),
                                             if (email.isNotEmpty)
                                               IconButton(
-                                                icon: const Icon(Icons.copy, size: 17, color: dim1),
+                                                icon: Icon(Icons.copy, size: 17, color: dim1),
                                                 tooltip: 'Salin email peserta',
                                                 onPressed: () {
                                                   Clipboard.setData(ClipboardData(text: email));
@@ -654,7 +654,7 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
                                                 },
                                               )
                                             else
-                                              const Icon(Icons.chevron_right, size: 18, color: dim2),
+                                              Icon(Icons.chevron_right, size: 18, color: dim2),
                                           ],
                                         ),
                                       ),
@@ -757,7 +757,7 @@ class _ManageEventScreenState extends State<ManageEventScreen> {
               onPressed: _deleting ? null : _openEditSheet,
               style: OutlinedButton.styleFrom(
                 foregroundColor: brandNavy,
-                side: const BorderSide(color: borderColor),
+                side: BorderSide(color: borderColor),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               icon: const Icon(Icons.edit_outlined, size: 16),

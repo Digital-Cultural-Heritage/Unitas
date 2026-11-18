@@ -172,7 +172,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -201,7 +201,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline, size: 48, color: dim2),
+                        Icon(Icons.error_outline, size: 48, color: dim2),
                         const SizedBox(height: 12),
                         Text(_error!, style: subTitle.copyWith(color: dim1)),
                         const SizedBox(height: 12),
@@ -231,7 +231,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.notifications_none, size: 48, color: dim2),
+                                Icon(Icons.notifications_none, size: 48, color: dim2),
                                 const SizedBox(height: 12),
                                 Text('Belum ada notifikasi', style: subTitle.copyWith(color: dim1)),
                                 const SizedBox(height: 4),
@@ -301,7 +301,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     bottom: -3,
                                     child: Container(
                                       padding: const EdgeInsets.all(3),
-                                      decoration: const BoxDecoration(
+                                      decoration: BoxDecoration(
                                         color: surface,
                                         shape: BoxShape.circle,
                                       ),

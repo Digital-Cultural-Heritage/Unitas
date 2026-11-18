@@ -304,7 +304,7 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
                         ],
                       ),
                     ),
-                    const Divider(height: 1, color: borderColor),
+                    Divider(height: 1, color: borderColor),
                     Expanded(
                       child: loadingApps
                           ? const Center(child: CircularProgressIndicator())
@@ -432,7 +432,7 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
                                             ],
                                           ),
                                           const SizedBox(height: 10),
-                                          const Divider(height: 1, color: borderColor),
+                                          Divider(height: 1, color: borderColor),
                                           const SizedBox(height: 10),
                                           Text('Update Status Referral:', style: caption.copyWith(fontSize: 11.5)),
                                           const SizedBox(height: 6),
@@ -483,7 +483,7 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
         backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: borderColor),
         ),
@@ -502,7 +502,7 @@ class _ManageJobScreenState extends State<ManageJobScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.wifi_off_rounded, size: 42, color: dim2),
+                        Icon(Icons.wifi_off_rounded, size: 42, color: dim2),
                         const SizedBox(height: 12),
                         Text('Gagal memuat lowongan', style: subTitle),
                         const SizedBox(height: 6),
