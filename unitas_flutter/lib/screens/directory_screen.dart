@@ -16,10 +16,14 @@ class DirectoryScreen extends StatefulWidget {
 
 class _DirectoryScreenState extends State<DirectoryScreen> {
   final _searchCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
   String _q = '';
   String _filter = 'Semua';
   List<Map<String, dynamic>> _alumni = [];
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _page = 1;
   String? _error;
   String? _currentUserId;
   final Map<String, String> _connectionStatus = {};
@@ -28,9 +32,17 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   final List<String> _filters = ['Semua', 'Terhubung', 'Jakarta', 'Lainnya'];
 
   @override
+  @override
   void initState() {
     super.initState();
+    _scrollCtrl.addListener(_onScroll);
     _load();
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
+      _loadMore();
+    }
   }
 
   @override
@@ -43,22 +55,29 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
 
   @override
   void dispose() {
+    _scrollCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+      _page = 1;
+      _hasMore = true;
+    });
     try {
       final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
-      var data = await UsersService.getDirectory(
-        q: _q, kota: kota,
+      var raw = await UsersService.getDirectory(
+        q: _q, kota: kota, page: 1,
       );
+      var data = raw;
       if (_filter == 'Terhubung') {
-        data = data.where((a) => a['connection_status'] == 'accepted').toList();
+        data = raw.where((a) => a['connection_status'] == 'accepted').toList();
       } else if (_filter == 'Lainnya') {
         // Filter "Lainnya" = bukan Jakarta
-        data = data.where((a) => (a['kota'] ?? '') != 'Jakarta').toList();
+        data = raw.where((a) => (a['kota'] ?? '') != 'Jakarta').toList();
       }
 
       try {
@@ -69,6 +88,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
       if (mounted) {
         setState(() {
           _alumni = data;
+          _hasMore = raw.length >= 30;
           for (final a in data) {
             final uid = a['user_id']?.toString() ?? '';
             if (uid.isNotEmpty) {
@@ -82,6 +102,38 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
       if (mounted) setState(() { _error = e.message; _loading = false; });
     } catch (_) {
       if (mounted) setState(() { _error = 'Tidak dapat memuat data'; _loading = false; });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore || _loading) return;
+    setState(() => _loadingMore = true);
+    try {
+      final nextPage = _page + 1;
+      final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
+      final raw = await UsersService.getDirectory(q: _q, kota: kota, page: nextPage);
+      var data = raw;
+      if (_filter == 'Terhubung') {
+        data = raw.where((a) => a['connection_status'] == 'accepted').toList();
+      } else if (_filter == 'Lainnya') {
+        data = raw.where((a) => (a['kota'] ?? '') != 'Jakarta').toList();
+      }
+      if (mounted) {
+        setState(() {
+          _alumni = [..._alumni, ...data];
+          _page = nextPage;
+          _hasMore = raw.length >= 30;
+          for (final a in data) {
+            final uid = a['user_id']?.toString() ?? '';
+            if (uid.isNotEmpty) {
+              _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
+            }
+          }
+          _loadingMore = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -415,6 +467,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
             onRefresh: _load,
             color: brandNavy,
             child: SingleChildScrollView(
+              controller: _scrollCtrl,
               physics: const AlwaysScrollableScrollPhysics(),
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 16),
@@ -605,6 +658,11 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                   );
                 }).toList(),
               ),
+            ),
+          if (_loadingMore)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
             ),
         ]),
               ),

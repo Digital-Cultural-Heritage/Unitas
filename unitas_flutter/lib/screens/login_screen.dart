@@ -171,21 +171,25 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 20),
 
                 // Register link
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Text('Belum punya akun?', style: body.copyWith(color: dim2)),
-                  const SizedBox(width: 4),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => RegisterScreen(
-                        onRegisterSuccess: widget.onLoginSuccess,
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 4,
+                  children: [
+                    Text('Belum punya akun?', style: body.copyWith(color: dim2)),
+                    GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => RegisterScreen(
+                          onRegisterSuccess: widget.onLoginSuccess,
+                        )),
+                      ),
+                      child: Text('Daftar sekarang', style: body.copyWith(
+                        color: brandNavy, fontWeight: FontWeight.w600,
                       )),
                     ),
-                    child: Text('Daftar sekarang', style: body.copyWith(
-                      color: brandNavy, fontWeight: FontWeight.w600,
-                    )),
-                  ),
-                ]),
+                  ],
+                ),
               ],
             ),
           ),

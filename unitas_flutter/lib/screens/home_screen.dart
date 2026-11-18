@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -48,9 +49,14 @@ class _HomeScreenState extends State<HomeScreen> {
   int _unreadMessages = 0;
   bool _loadingFeed = true;
   bool _loadingMeta = true;
+  bool _loadingMoreFeed = false;
+  bool _hasMoreFeed = true;
+  int _feedPage = 1;
   bool _posting = false;
   final Map<String, bool> _likedMap = {};
   final _postCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  Timer? _badgeTimer;
   XFile? _selectedImage;
   Uint8List? _selectedImageBytes;
   int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
@@ -66,6 +72,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _badgeTimer?.cancel();
+    _scrollCtrl.dispose();
     _postCtrl.dispose();
     super.dispose();
   }
@@ -73,18 +81,69 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _scrollCtrl.addListener(_onScroll);
+    _badgeTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshBadges());
     _load();
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
+      _loadMoreFeed();
+    }
+  }
+
+  Future<void> _refreshBadges() async {
+    try {
+      final results = await Future.wait([
+        NotificationsService.getNotifications(limit: 10).catchError((_) => <String, dynamic>{}),
+        MessagesService.getConversations().catchError((_) => <String, dynamic>{}),
+      ]);
+      if (mounted) {
+        final notifRes = results[0];
+        final msgRes = results[1];
+        setState(() {
+          _unreadNotifications = (notifRes['unread_count'] as num?)?.toInt() ?? _unreadNotifications;
+          _unreadMessages = (msgRes['total_unread'] as num?)?.toInt() ?? _unreadMessages;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _load() async {
     // Load me, stats, events, and jobs in parallel
     _loadMeta();
-    // Load feed
+    // Load feed (page 1)
     try {
-      final posts = await PostsService.getFeed();
-      if (mounted) setState(() { _posts = posts; _loadingFeed = false; });
+      final posts = await PostsService.getFeed(page: 1);
+      if (mounted) {
+        setState(() {
+          _posts = posts;
+          _feedPage = 1;
+          _hasMoreFeed = posts.length >= 20;
+          _loadingFeed = false;
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _loadingFeed = false);
+    }
+  }
+
+  Future<void> _loadMoreFeed() async {
+    if (_loadingMoreFeed || !_hasMoreFeed || _loadingFeed) return;
+    setState(() => _loadingMoreFeed = true);
+    try {
+      final nextPage = _feedPage + 1;
+      final more = await PostsService.getFeed(page: nextPage);
+      if (mounted) {
+        setState(() {
+          _posts = [..._posts, ...more];
+          _feedPage = nextPage;
+          _hasMoreFeed = more.length >= 20;
+          _loadingMoreFeed = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingMoreFeed = false);
     }
   }
 
@@ -542,6 +601,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onRefresh: _load,
               color: brandNavy,
               child: SingleChildScrollView(
+                controller: _scrollCtrl,
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(bottom: 84),
                 child: Column(
@@ -1259,6 +1319,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             );
           }),
+          if (_loadingMoreFeed)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            ),
       ],
     );
   }

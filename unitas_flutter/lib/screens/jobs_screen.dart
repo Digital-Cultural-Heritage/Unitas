@@ -17,9 +17,13 @@ class _JobsScreenState extends State<JobsScreen> {
   String _filter = 'Semua';
   String _searchQuery = '';
   final _searchCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
   List<Map<String, dynamic>> _jobs = [];
   final Set<String> _savedIds = {};
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _page = 1;
 
   final List<Map<String, dynamic>> _filters = const [
     {'label': 'Semua', 'icon': Icons.apps_rounded},
@@ -33,17 +37,29 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void initState() {
     super.initState();
+    _scrollCtrl.addListener(_onScroll);
     _load();
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
+      _loadMore();
+    }
   }
 
   @override
   void dispose() {
+    _scrollCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _page = 1;
+      _hasMore = true;
+    });
     try {
       final isRemote = _filter == 'Remote' ? true : null;
       if (_filter == 'Tersimpan') {
@@ -51,14 +67,16 @@ class _JobsScreenState extends State<JobsScreen> {
         if (mounted) {
           setState(() {
             _jobs = saved;
+            _hasMore = false;
             _savedIds.addAll(saved.map((j) => j['id']?.toString() ?? ''));
             _loading = false;
           });
         }
       } else {
-        final jobs = await JobsService.getJobs(isRemote: isRemote);
+        final jobs = await JobsService.getJobs(isRemote: isRemote, page: 1);
         if (mounted) {
           setState(() {
+            _hasMore = jobs.length >= 20;
             if (_filter != 'Semua' && _filter != 'Remote') {
               _jobs = jobs.where((j) => j['job_type'] == _filter).toList();
             } else {
@@ -70,6 +88,29 @@ class _JobsScreenState extends State<JobsScreen> {
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore || _loading || _filter == 'Tersimpan') return;
+    setState(() => _loadingMore = true);
+    try {
+      final nextPage = _page + 1;
+      final isRemote = _filter == 'Remote' ? true : null;
+      final more = await JobsService.getJobs(isRemote: isRemote, page: nextPage);
+      if (mounted) {
+        setState(() {
+          final filtered = (_filter != 'Semua' && _filter != 'Remote')
+              ? more.where((j) => j['job_type'] == _filter).toList()
+              : more;
+          _jobs = [..._jobs, ...filtered];
+          _page = nextPage;
+          _hasMore = more.length >= 20;
+          _loadingMore = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -176,6 +217,7 @@ class _JobsScreenState extends State<JobsScreen> {
               onRefresh: _load,
               color: brandNavy,
               child: SingleChildScrollView(
+                controller: _scrollCtrl,
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(bottom: 100),
                 child: Column(
@@ -559,6 +601,11 @@ class _JobsScreenState extends State<JobsScreen> {
                             );
                           }).toList(),
                         ),
+                      ),
+                    if (_loadingMore)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
                       ),
                   ],
                 ),

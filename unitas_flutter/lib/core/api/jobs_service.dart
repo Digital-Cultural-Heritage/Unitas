@@ -5,8 +5,9 @@ class JobsService {
   static Future<List<Map<String, dynamic>>> getJobs({
     String? q,
     bool? isRemote,
+    int page = 1,
   }) async {
-    final params = StringBuffer('/api/jobs?limit=30');
+    final params = StringBuffer('/api/jobs?page=$page&limit=20');
     if (q != null && q.isNotEmpty) params.write('&q=${Uri.encodeComponent(q)}');
     if (isRemote == true) params.write('&is_remote=true');
 

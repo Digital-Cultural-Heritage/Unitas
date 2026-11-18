@@ -26,7 +26,7 @@ class ChatRoomScreen extends StatefulWidget {
   State<ChatRoomScreen> createState() => _ChatRoomScreenState();
 }
 
-class _ChatRoomScreenState extends State<ChatRoomScreen> {
+class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObserver {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<Map<String, dynamic>> _messages = [];
@@ -44,12 +44,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _init();
-    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadMessages(silent: true));
+    _startPolling();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _loadMessages(silent: true));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadMessages(silent: true);
+      _startPolling();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _pollTimer?.cancel();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
