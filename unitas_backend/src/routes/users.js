@@ -2,6 +2,8 @@ const express = require("express");
 const { body, query, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { createNotification } = require("../lib/notifications");
+const { verifyAccessToken } = require("../lib/jwt");
 
 const router = express.Router();
 
@@ -15,7 +17,8 @@ router.get("/me", requireAuth, async (req, res, next) => {
       .single();
     if (error) throw error;
 
-    const profile = data.user_profiles?.[0] || {};
+    const rawProfile = data.user_profiles;
+    const profile = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) || {};
     res.json({ id: data.id, email: data.email, role: data.role, ...profile });
   } catch (err) {
     next(err);
@@ -65,7 +68,36 @@ router.get("/", async (req, res, next) => {
     const { data, count, error } = await dbQuery;
     if (error) throw error;
 
-    res.json({ data, total: count, page: Number(page), limit: Number(limit) });
+    let statusMap = {};
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ") && data && data.length > 0) {
+      try {
+        const decoded = verifyAccessToken(authHeader.split(" ")[1]);
+        const currentUserId = decoded.userId;
+        const { data: conns } = await supabase
+          .from("alumni_connections")
+          .select("requester_id, addressee_id, status")
+          .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`);
+
+        if (conns) {
+          for (const c of conns) {
+            const otherId = c.requester_id === currentUserId ? c.addressee_id : c.requester_id;
+            if (c.status === "accepted") {
+              statusMap[otherId] = "accepted";
+            } else if (c.status === "pending") {
+              statusMap[otherId] = c.requester_id === currentUserId ? "pending" : "incoming";
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    const enriched = (data || []).map((row) => ({
+      ...row,
+      connection_status: statusMap[row.user_id] || "none",
+    }));
+
+    res.json({ data: enriched, total: count, page: Number(page), limit: Number(limit) });
   } catch (err) {
     next(err);
   }
@@ -107,7 +139,14 @@ router.post("/:id/connect", requireAuth, async (req, res, next) => {
       .single();
 
     if (existing) {
-      if (existing.status === "accepted") return res.json({ message: "Sudah terhubung" });
+      if (existing.status === "accepted") {
+        return res.json({ message: "Sudah terhubung", connection: existing });
+      }
+
+      // Jika pengirim yang sama menekan lagi, jangan auto-accept permintaan sendiri
+      if (existing.status === "pending" && existing.requester_id === requesterId) {
+        return res.json({ message: "Permintaan koneksi sudah dikirim", connection: existing });
+      }
 
       // Setujui jika ada pending dari sisi lain
       if (existing.status === "pending") {
@@ -129,6 +168,20 @@ router.post("/:id/connect", requireAuth, async (req, res, next) => {
       .select()
       .single();
     if (error) throw error;
+
+    const { data: actorProfile } = await supabase
+      .from("user_profiles")
+      .select("full_name")
+      .eq("user_id", requesterId)
+      .single();
+    await createNotification({
+      userId: addresseeId,
+      actorId: requesterId,
+      type: "connection_request",
+      title: `${actorProfile?.full_name || "Alumni"} mengirim permintaan koneksi`,
+      referenceId: data.id,
+    });
+
     res.status(201).json({ message: "Permintaan koneksi dikirim", connection: data });
   } catch (err) {
     next(err);
@@ -188,6 +241,20 @@ router.put("/requests/:id", requireAuth, async (req, res, next) => {
       .select()
       .single();
     if (error) throw error;
+    if (status === "accepted" && data) {
+      const { data: actorProfile } = await supabase
+        .from("user_profiles")
+        .select("full_name")
+        .eq("user_id", req.user.userId)
+        .single();
+      await createNotification({
+        userId: data.requester_id,
+        actorId: req.user.userId,
+        type: "connection_accepted",
+        title: `${actorProfile?.full_name || "Alumni"} menerima permintaan koneksimu`,
+        referenceId: data.id,
+      });
+    }
     res.json(data);
   } catch (err) {
     next(err);

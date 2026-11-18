@@ -13,7 +13,7 @@ const Color card    = Color(0xFFEDE9E0);
 // ─── Text / Dim (navy-based transparency) ────────────────────────────────────
 const Color textPrimary  = brandNavy;                          // headings
 const Color dim1         = Color(0x99_1E3A5F);                 // 60% navy — body
-const Color dim2         = Color(0x61_1E3A5F);                 // 38% navy — muted
+const Color dim2         = Color(0x94_1E3A5F);                 // 58% navy — muted
 const Color dim3         = Color(0x1F_1E3A5F);                 // 12% navy — subtle
 
 // ─── Borders ─────────────────────────────────────────────────────────────────

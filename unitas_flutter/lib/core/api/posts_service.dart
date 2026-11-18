@@ -36,9 +36,20 @@ class PostsService {
     return Map<String, dynamic>.from(res);
   }
 
+  // ── Update Post ────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> updatePost(String postId, String content) async {
+    final res = await ApiClient.put('/api/posts/$postId', body: {'content': content});
+    return Map<String, dynamic>.from(res);
+  }
+
   // ── Delete Post ────────────────────────────────────────────────────────
   static Future<void> deletePost(String postId) async {
     await ApiClient.delete('/api/posts/$postId');
+  }
+
+  // ── Delete Comment ─────────────────────────────────────────────────────
+  static Future<void> deleteComment(String postId, String commentId) async {
+    await ApiClient.delete('/api/posts/$postId/comments/$commentId');
   }
 
   // ── Toggle like ────────────────────────────────────────────────────────

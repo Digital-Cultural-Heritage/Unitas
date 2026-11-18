@@ -79,6 +79,45 @@ class AuthService {
     }
   }
 
+  // ── Password management ───────────────────────────────────────────────
+  static Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await ApiClient.post(
+      '/api/auth/change-password',
+      body: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> forgotPassword(String email) async {
+    final res = await ApiClient.post(
+      '/api/auth/forgot-password',
+      body: {'email': email},
+      auth: false,
+    );
+    return Map<String, dynamic>.from(res);
+  }
+
+  static Future<void> resetPassword({
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    await ApiClient.post(
+      '/api/auth/reset-password',
+      body: {
+        'email': email,
+        'otp': otp,
+        'new_password': newPassword,
+      },
+      auth: false,
+    );
+  }
+
   // ── Internal ───────────────────────────────────────────────────────────
   static Future<void> _saveSession(dynamic res) async {
     final prefs = await SharedPreferences.getInstance();

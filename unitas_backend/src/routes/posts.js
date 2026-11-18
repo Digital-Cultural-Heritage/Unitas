@@ -2,6 +2,7 @@
 const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { createNotification } = require("../lib/notifications");
 
 const router = express.Router();
 
@@ -57,6 +58,40 @@ router.post(
   }
 );
 
+// -- PUT /api/posts/:id — Edit post caption --------------------------------
+router.put(
+  "/:id",
+  requireAuth,
+  [body("content").trim().notEmpty().withMessage("Konten post wajib diisi")],
+  async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    try {
+      const { data: post, error: fetchErr } = await supabase
+        .from("posts")
+        .select("user_id")
+        .eq("id", req.params.id)
+        .single();
+      if (fetchErr || !post) return res.status(404).json({ error: "Post tidak ditemukan" });
+      if (post.user_id !== req.user.userId) return res.status(403).json({ error: "Tidak diizinkan" });
+
+      const { data, error } = await supabase
+        .from("posts")
+        .update({ content: req.body.content.trim() })
+        .eq("id", req.params.id)
+        .select(`
+          id, content, image_url, likes_count, comments_count, created_at, updated_at,
+          user:user_id(id, user_profiles(full_name, initials, avatar_url, prodi, angkatan))
+        `)
+        .single();
+      if (error) throw error;
+      res.json(data);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // -- DELETE /api/posts/:id -------------------------------------------------
 router.delete("/:id", requireAuth, async (req, res, next) => {
   try {
@@ -96,6 +131,22 @@ router.post("/:id/like", requireAuth, async (req, res, next) => {
     } else {
       // Like
       await supabase.from("post_likes").insert({ post_id: postId, user_id: userId });
+
+      const [{ data: post }, { data: actorProfile }] = await Promise.all([
+        supabase.from("posts").select("user_id").eq("id", postId).single(),
+        supabase.from("user_profiles").select("full_name").eq("user_id", userId).single(),
+      ]);
+      if (post) {
+        const actorName = actorProfile?.full_name || "Seseorang";
+        await createNotification({
+          userId: post.user_id,
+          actorId: userId,
+          type: "like",
+          title: `${actorName} menyukai postinganmu`,
+          referenceId: postId,
+        });
+      }
+
       res.json({ liked: true });
     }
   } catch (err) {
@@ -163,6 +214,23 @@ router.post(
       if (error) throw error;
       
       await supabase.rpc("increment_points", { uid: req.user.userId, pts: 2 });
+
+      const { data: post } = await supabase
+        .from("posts")
+        .select("user_id")
+        .eq("id", postId)
+        .single();
+      if (post) {
+        const actorName = data?.user?.user_profiles?.[0]?.full_name || "Seseorang";
+        await createNotification({
+          userId: post.user_id,
+          actorId: req.user.userId,
+          type: "comment",
+          title: `${actorName} mengomentari postinganmu`,
+          body: content,
+          referenceId: postId,
+        });
+      }
       
       res.status(201).json(data);
     } catch (err) {
@@ -170,5 +238,28 @@ router.post(
     }
   }
 );
+
+// -- DELETE /api/posts/:id/comments/:commentId - Delete own comment --------
+router.delete("/:id/comments/:commentId", requireAuth, async (req, res, next) => {
+  try {
+    const { data: comment, error: fetchErr } = await supabase
+      .from("post_comments")
+      .select("user_id")
+      .eq("id", req.params.commentId)
+      .eq("post_id", req.params.id)
+      .single();
+    if (fetchErr || !comment) return res.status(404).json({ error: "Komentar tidak ditemukan" });
+    if (comment.user_id !== req.user.userId) return res.status(403).json({ error: "Tidak diizinkan" });
+
+    const { error } = await supabase
+      .from("post_comments")
+      .delete()
+      .eq("id", req.params.commentId);
+    if (error) throw error;
+    res.json({ message: "Komentar dihapus" });
+  } catch (err) {
+    next(err);
+  }
+});
 
 module.exports = router;

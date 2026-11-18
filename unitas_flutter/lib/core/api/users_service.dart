@@ -13,21 +13,35 @@ class UsersService {
     if (kota != null && kota != 'Semua') params.write('&kota=${Uri.encodeComponent(kota)}');
     if (isOnline == true) params.write('&is_online=true');
 
-    final res = await ApiClient.get(params.toString(), auth: false);
+    final res = await ApiClient.get(params.toString(), auth: true);
     final list = res['data'] as List? ?? [];
     return list.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   // ── My profile ─────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getMe() async {
-    final res = await ApiClient.get('/api/users/me');
-    return Map<String, dynamic>.from(res);
+    final res = Map<String, dynamic>.from(await ApiClient.get('/api/users/me'));
+    if (res['full_name'] == null && res['id'] != null) {
+      try {
+        final profile = Map<String, dynamic>.from(
+          await ApiClient.get('/api/users/${res['id']}', auth: false),
+        );
+        return {...profile, ...res};
+      } catch (_) {}
+    }
+    return res;
   }
 
   // ── Update profile ─────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> updateMe(Map<String, dynamic> updates) async {
     final res = await ApiClient.put('/api/users/me', body: updates);
     return Map<String, dynamic>.from(res);
+  }
+
+  // ── Upload avatar ──────────────────────────────────────────────────────
+  static Future<String> uploadAvatar(List<int> bytes, String filename) async {
+    final res = await ApiClient.uploadFile('/api/upload/avatar', bytes: bytes, filename: filename);
+    return res['url'] as String;
   }
 
   // ── Connect ────────────────────────────────────────────────────────────

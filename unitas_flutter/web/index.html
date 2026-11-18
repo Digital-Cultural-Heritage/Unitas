@@ -31,8 +31,90 @@
 
   <title>unitas_flutter</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body {
+      background-color: #FDFBF7;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #splash-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: #FDFBF7;
+      z-index: 9999;
+      transition: opacity 0.25s ease;
+    }
+    .splash-badge {
+      width: 60px;
+      height: 60px;
+      border-radius: 18px;
+      background-color: #1E3A5F;
+      color: #C9A84C;
+      font-size: 30px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .splash-title {
+      margin-top: 14px;
+      color: #1E3A5F;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .splash-sub {
+      margin-top: 4px;
+      color: rgba(30, 58, 95, 0.6);
+      font-size: 13px;
+    }
+    .splash-bar {
+      margin-top: 20px;
+      width: 140px;
+      height: 3px;
+      border-radius: 99px;
+      background-color: rgba(30, 58, 95, 0.12);
+      overflow: hidden;
+      position: relative;
+    }
+    .splash-bar::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      width: 45%;
+      background-color: #1E3A5F;
+      border-radius: 99px;
+      animation: splashSlide 1.1s ease-in-out infinite;
+    }
+    @keyframes splashSlide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(260%); }
+    }
+  </style>
 </head>
 <body>
+  <div id="splash-loader">
+    <div class="splash-badge">U</div>
+    <div class="splash-title">Unitas</div>
+    <div class="splash-sub">Memuat aplikasi…</div>
+    <div class="splash-bar"></div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var el = document.getElementById('splash-loader');
+      if (el) {
+        el.style.opacity = '0';
+        setTimeout(function () { el.remove(); }, 250);
+      }
+    });
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

@@ -11,6 +11,8 @@ const eventsRoutes = require("../src/routes/events");
 const jobsRoutes   = require("../src/routes/jobs");
 const uploadRoutes = require("../src/routes/upload");
 const statsRoutes  = require("../src/routes/stats");
+const notificationsRoutes = require("../src/routes/notifications");
+const messagesRoutes      = require("../src/routes/messages");
 
 const app = express();
 
@@ -45,6 +47,8 @@ app.use("/api/events", eventsRoutes);
 app.use("/api/jobs",   jobsRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/stats",  statsRoutes);
+app.use("/api/notifications", notificationsRoutes);
+app.use("/api/messages",      messagesRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────
 app.use((req, res) => {
