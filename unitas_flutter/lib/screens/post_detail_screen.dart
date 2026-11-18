@@ -24,6 +24,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Map<String, dynamic>? _me;
 
   late int _likesCount;
+  late String _postContent;
   bool _liked = false;
   String? _replyToCommentId;
   String? _replyToName;
@@ -32,6 +33,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _postContent = (widget.post['content'] ?? '').toString();
     _likesCount = (widget.post['likes_count'] as num?)?.toInt() ?? 0;
     if (_likesCount < 0) _likesCount = 0;
     _load();
@@ -181,6 +183,84 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  Future<void> _editPost() async {
+    final postId = widget.post['id']?.toString();
+    if (postId == null) return;
+    final ctrl = TextEditingController(text: _postContent);
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Edit Postingan'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 5,
+          minLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Tulis pembaruan…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: brandNavy),
+            onPressed: () {
+              final txt = ctrl.text.trim();
+              if (txt.isNotEmpty) Navigator.pop(c, txt);
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    if (updated == null) return;
+
+    try {
+      await PostsService.updatePost(postId, updated);
+      if (mounted) {
+        setState(() => _postContent = updated);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Postingan berhasil diperbarui')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memperbarui postingan')),
+        );
+      }
+    }
+  }
+
+  void _openImageViewer(String url) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) => Stack(
+        children: [
+          Center(
+            child: InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 4.0,
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: SafeArea(
+              child: IconButton.filled(
+                style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                onPressed: () => Navigator.pop(ctx),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _deletePost() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -289,10 +369,34 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         iconTheme: const IconThemeData(color: brandNavy),
         actions: [
           if (amIOwner)
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.red),
-              tooltip: 'Hapus postingan',
-              onPressed: _deletePost,
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: brandNavy),
+              onSelected: (val) {
+                if (val == 'edit') _editPost();
+                if (val == 'delete') _deletePost();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_outlined, color: brandNavy, size: 18),
+                      SizedBox(width: 8),
+                      Text('Edit Postingan'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                      SizedBox(width: 8),
+                      Text('Hapus Postingan', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -344,17 +448,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ),
                               const SizedBox(height: 8),
                               Text(
-                                widget.post['content']?.toString() ?? '',
+                                _postContent,
                                 style: body.copyWith(color: textPrimary, height: 1.45),
                               ),
                               if (widget.post['image_url'] != null) ...[
                                 const SizedBox(height: 12),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    widget.post['image_url'].toString(),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => const SizedBox(),
+                                GestureDetector(
+                                  onTap: () => _openImageViewer(widget.post['image_url'].toString()),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Image.network(
+                                      widget.post['image_url'].toString(),
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, _, _) => const SizedBox(),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -623,10 +730,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  c['content']?.toString() ?? '',
-                  style: body.copyWith(fontSize: 13.5, color: textPrimary, height: 1.35),
-                ),
+                _buildCommentContent(c['content']?.toString() ?? ''),
                 const SizedBox(height: 4),
                 InkWell(
                   onTap: () => _startReply(c, rootParentId: isReply ? rootParentId : null),
@@ -645,6 +749,26 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommentContent(String text) {
+    final baseStyle = body.copyWith(fontSize: 13.5, color: textPrimary, height: 1.35);
+    final match = RegExp(r'^(@\S+)(\s+.*)?$', dotAll: true).firstMatch(text);
+    if (match == null) {
+      return Text(text, style: baseStyle);
+    }
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: match.group(1),
+            style: baseStyle.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+          ),
+          if (match.group(2) != null)
+            TextSpan(text: match.group(2), style: baseStyle),
         ],
       ),
     );
