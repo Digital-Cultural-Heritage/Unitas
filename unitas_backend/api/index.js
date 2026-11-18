@@ -36,12 +36,12 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Lazy-load tiap router agar cold start serverless tidak memuat dependensi berat
-// (mis. sharp/multer/google-auth-library) pada endpoint yang tidak memakainya.
-function lazyRoute(modulePath) {
+// Lazy-load tiap router agar cold start serverless tidak memuat dependensi berat,
+// sambil tetap memakai literal require(...) agar bundler Vercel (@vercel/nft) menyertakan semua route.
+function lazyRoute(loader) {
   let router;
   return (req, res, next) => {
-    if (!router) router = require(modulePath);
+    if (!router) router = loader();
     return router(req, res, next);
   };
 }
@@ -58,15 +58,15 @@ if (missingEnv.length > 0) {
   });
 } else {
   // ── API Routes ──────────────────────────────────────────────────────────
-  app.use("/api/auth",          lazyRoute("../src/routes/auth"));
-  app.use("/api/users",         lazyRoute("../src/routes/users"));
-  app.use("/api/posts",         lazyRoute("../src/routes/posts"));
-  app.use("/api/events",        lazyRoute("../src/routes/events"));
-  app.use("/api/jobs",          lazyRoute("../src/routes/jobs"));
-  app.use("/api/upload",        lazyRoute("../src/routes/upload"));
-  app.use("/api/stats",         lazyRoute("../src/routes/stats"));
-  app.use("/api/notifications", lazyRoute("../src/routes/notifications"));
-  app.use("/api/messages",      lazyRoute("../src/routes/messages"));
+  app.use("/api/auth",          lazyRoute(() => require("../src/routes/auth")));
+  app.use("/api/users",         lazyRoute(() => require("../src/routes/users")));
+  app.use("/api/posts",         lazyRoute(() => require("../src/routes/posts")));
+  app.use("/api/events",        lazyRoute(() => require("../src/routes/events")));
+  app.use("/api/jobs",          lazyRoute(() => require("../src/routes/jobs")));
+  app.use("/api/upload",        lazyRoute(() => require("../src/routes/upload")));
+  app.use("/api/stats",         lazyRoute(() => require("../src/routes/stats")));
+  app.use("/api/notifications", lazyRoute(() => require("../src/routes/notifications")));
+  app.use("/api/messages",      lazyRoute(() => require("../src/routes/messages")));
 }
 
 // ── 404 handler ───────────────────────────────────────────────────────────
