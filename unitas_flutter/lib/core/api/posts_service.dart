@@ -31,8 +31,14 @@ class PostsService {
     return (res['data'] as List).cast<Map<String, dynamic>>();
   }
 
-  static Future<Map<String, dynamic>> addComment(String postId, String content) async {
-    final res = await ApiClient.post('/api/posts/$postId/comments', body: {'content': content});
+  static Future<Map<String, dynamic>> addComment(
+    String postId,
+    String content, {
+    String? parentId,
+  }) async {
+    final body = <String, dynamic>{'content': content};
+    if (parentId != null && parentId.isNotEmpty) body['parent_id'] = parentId;
+    final res = await ApiClient.post('/api/posts/$postId/comments', body: body);
     return Map<String, dynamic>.from(res);
   }
 

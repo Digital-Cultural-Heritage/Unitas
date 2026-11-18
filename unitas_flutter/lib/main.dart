@@ -15,11 +15,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 Future<void> main() async {
   // Synchronous — jangan panggil plugin apapun di sini
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-  ));
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (_) {}
+  try {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ));
+  } catch (_) {}
   runApp(const UnitasApp());
 }
 

@@ -176,7 +176,7 @@ router.get("/:id/comments", async (req, res, next) => {
     const { data, error } = await supabase
       .from("post_comments")
       .select(`
-        id, content, created_at,
+        id, parent_id, content, created_at,
         user:user_id(id, user_profiles(full_name, initials, avatar_url))
       `)
       .eq("post_id", req.params.id)
@@ -200,13 +200,18 @@ router.post(
     
     try {
       const postId = req.params.id;
-      const { content } = req.body;
+      const { content, parent_id } = req.body;
       
       const { data, error } = await supabase
         .from("post_comments")
-        .insert({ post_id: postId, user_id: req.user.userId, content })
+        .insert({
+          post_id: postId,
+          user_id: req.user.userId,
+          content,
+          parent_id: parent_id || null,
+        })
         .select(`
-          id, content, created_at,
+          id, parent_id, content, created_at,
           user:user_id(id, user_profiles(full_name, initials, avatar_url))
         `)
         .single();
@@ -215,13 +220,13 @@ router.post(
       
       await supabase.rpc("increment_points", { uid: req.user.userId, pts: 2 });
 
+      const actorName = data?.user?.user_profiles?.[0]?.full_name || "Seseorang";
       const { data: post } = await supabase
         .from("posts")
         .select("user_id")
         .eq("id", postId)
         .single();
       if (post) {
-        const actorName = data?.user?.user_profiles?.[0]?.full_name || "Seseorang";
         await createNotification({
           userId: post.user_id,
           actorId: req.user.userId,
@@ -230,6 +235,24 @@ router.post(
           body: content,
           referenceId: postId,
         });
+      }
+
+      if (parent_id) {
+        const { data: parentComment } = await supabase
+          .from("post_comments")
+          .select("user_id")
+          .eq("id", parent_id)
+          .single();
+        if (parentComment && parentComment.user_id !== post?.user_id) {
+          await createNotification({
+            userId: parentComment.user_id,
+            actorId: req.user.userId,
+            type: "comment",
+            title: `${actorName} membalas komentarmu`,
+            body: content,
+            referenceId: postId,
+          });
+        }
       }
       
       res.status(201).json(data);

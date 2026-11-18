@@ -7,7 +7,13 @@ import '../utils/image_validator.dart';
 /// Ganti dengan URL backend kamu.
 /// Dev: http://localhost:3002
 /// Prod: https://your-app.vercel.app
-String get kBaseUrl => dotenv.env['BACKEND_URL'] ?? 'http://localhost:3002';
+String get kBaseUrl {
+  try {
+    return dotenv.env['BACKEND_URL'] ?? 'https://unitas-beta.vercel.app';
+  } catch (_) {
+    return 'https://unitas-beta.vercel.app';
+  }
+}
 
 class ApiClient {
   // ── Token storage ──────────────────────────────────────────────────────
