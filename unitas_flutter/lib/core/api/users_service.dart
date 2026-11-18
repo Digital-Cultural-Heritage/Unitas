@@ -18,6 +18,12 @@ class UsersService {
     return list.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
+  // ── Get single user profile ────────────────────────────────────────────
+  static Future<Map<String, dynamic>> getUserById(String userId) async {
+    final res = await ApiClient.get('/api/users/$userId', auth: true);
+    return Map<String, dynamic>.from(res);
+  }
+
   // ── My profile ─────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getMe() async {
     final res = Map<String, dynamic>.from(await ApiClient.get('/api/users/me'));

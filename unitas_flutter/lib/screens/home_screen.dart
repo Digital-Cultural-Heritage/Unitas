@@ -19,6 +19,7 @@ import 'package:image_picker/image_picker.dart';
 import 'post_detail_screen.dart';
 import 'notifications_screen.dart';
 import 'chat_list_screen.dart';
+import 'alumni_profile_screen.dart';
 
 
 class HomeScreen extends StatefulWidget {
@@ -1425,63 +1426,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openAuthorProfileSheet(Map<String, dynamic> post, String prodi, dynamic angkatan) {
+    if (_isMyPost(post)) {
+      widget.onOpenProfile?.call();
+      return;
+    }
+    final posterId = (post['user']?['id'] ?? post['user_id'] ?? '').toString();
+    if (posterId.isEmpty) return;
     final profile = _profile(post);
-    final name = (profile['full_name'] ?? 'Alumni').toString();
-    final ini = _initials(post);
-    final isMine = _isMyPost(post);
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: brandBg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                UnitasAvatar(
-                  initials: ini,
-                  color: _colorFor(post['user_id'] ?? name),
-                  size: 52,
-                  avatarUrl: _avatarWithVersion(profile['avatar_url']),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name, style: heading.copyWith(fontSize: 18)),
-                      const SizedBox(height: 3),
-                      Text(
-                        [prodi, angkatan?.toString() ?? ''].where((s) => s.isNotEmpty).join(' · '),
-                        style: caption,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: brandNavy),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  if (isMine) {
-                    widget.onOpenProfile?.call();
-                  } else {
-                    widget.onOpenDirectory?.call();
-                  }
-                },
-                child: Text(isMine ? 'Buka Profil Saya' : 'Lihat di Direktori Alumni'),
-              ),
-            ),
-          ],
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlumniProfileScreen(
+          userId: posterId,
+          initialProfile: {
+            ...profile,
+            'user_id': posterId,
+            if (prodi.isNotEmpty) 'prodi': prodi,
+            if (angkatan != null) 'angkatan': angkatan,
+          },
         ),
       ),
     );

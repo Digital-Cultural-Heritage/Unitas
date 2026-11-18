@@ -112,7 +112,34 @@ router.get("/:id", async (req, res, next) => {
       .eq("user_id", req.params.id)
       .single();
     if (error || !data) return res.status(404).json({ error: "Alumni tidak ditemukan" });
-    res.json(data);
+
+    let connection_status = "none";
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const decoded = verifyAccessToken(authHeader.split(" ")[1]);
+        const currentUserId = decoded.userId;
+        if (currentUserId !== req.params.id) {
+          const { data: conn } = await supabase
+            .from("alumni_connections")
+            .select("requester_id, addressee_id, status")
+            .or(
+              `and(requester_id.eq.${currentUserId},addressee_id.eq.${req.params.id}),` +
+              `and(requester_id.eq.${req.params.id},addressee_id.eq.${currentUserId})`
+            )
+            .limit(1)
+            .single();
+          if (conn) {
+            if (conn.status === "accepted") connection_status = "accepted";
+            else if (conn.status === "pending") {
+              connection_status = conn.requester_id === currentUserId ? "pending" : "incoming";
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    res.json({ ...data, connection_status });
   } catch (err) {
     next(err);
   }
