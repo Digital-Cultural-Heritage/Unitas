@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/api_client.dart';
+import '../core/api/users_service.dart';
 
 class CreateJobScreen extends StatefulWidget {
   const CreateJobScreen({super.key});
@@ -27,6 +28,27 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   final List<String> _types = ['Full-time', 'Part-time', 'Contract', 'Internship'];
   final List<String> _suggestedTags = ['Startup', 'Flutter', 'Backend', 'UI/UX', 'Fresh Graduate', 'WFA'];
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefillFromProfile();
+  }
+
+  Future<void> _prefillFromProfile() async {
+    try {
+      final me = await UsersService.getMe();
+      if (!mounted) return;
+      final company = (me['perusahaan'] ?? '').toString().trim();
+      final city = (me['kota'] ?? '').toString().trim();
+      if (_companyCtrl.text.isEmpty && company.isNotEmpty) {
+        _companyCtrl.text = company;
+      }
+      if (_locCtrl.text.isEmpty && city.isNotEmpty) {
+        _locCtrl.text = city;
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {

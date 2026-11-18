@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/image_validator.dart';
 
@@ -304,6 +305,46 @@ class ApiClient {
           bytes,
           filename: filename,
           contentType: mediaType,
+        ));
+        final streamed = await req.send().timeout(_kUploadTimeout);
+        return http.Response.fromStream(streamed);
+      },
+      auth: true,
+    );
+  }
+
+  static Future<dynamic> uploadPdf(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+  }) {
+    if (bytes.isEmpty) {
+      throw const ApiException('File CV PDF kosong.', 400);
+    }
+    if (bytes.length > 4 * 1024 * 1024) {
+      throw const ApiException('Ukuran file PDF awal maksimal 4 MB sebelum dikompresi.', 400);
+    }
+    if (!filename.toLowerCase().endsWith('.pdf')) {
+      throw const ApiException('Format CV harus berupa file PDF (.pdf).', 400);
+    }
+    if (bytes.length < 5 ||
+        bytes[0] != 0x25 || // %
+        bytes[1] != 0x50 || // P
+        bytes[2] != 0x44 || // D
+        bytes[3] != 0x46 || // F
+        bytes[4] != 0x2D) { // -
+      throw const ApiException('File bukan PDF yang valid.', 400);
+    }
+
+    return _request(
+      (token) async {
+        final req = http.MultipartRequest('POST', Uri.parse('$kBaseUrl$path'));
+        if (token != null) req.headers['Authorization'] = 'Bearer $token';
+        req.files.add(http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+          contentType: MediaType('application', 'pdf'),
         ));
         final streamed = await req.send().timeout(_kUploadTimeout);
         return http.Response.fromStream(streamed);

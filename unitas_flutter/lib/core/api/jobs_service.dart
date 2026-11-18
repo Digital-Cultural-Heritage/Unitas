@@ -22,16 +22,67 @@ class JobsService {
     return asJsonMapList(res);
   }
 
+  // ── Get applied jobs ───────────────────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getAppliedJobs() async {
+    final res = await ApiClient.get('/api/jobs/applied');
+    return asJsonMapList(res);
+  }
+
   // ── Toggle save ────────────────────────────────────────────────────────
   static Future<bool> toggleSave(String jobId) async {
     final res = asJsonMap(await ApiClient.post('/api/jobs/$jobId/save'));
     return res['saved'] == true;
   }
 
+  // ── Upload & compress CV PDF (max 1 MB) ───────────────────────────────
+  static Future<Map<String, dynamic>> uploadCv({
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final res = await ApiClient.uploadPdf(
+      '/api/upload/cv',
+      bytes: bytes,
+      filename: filename,
+    );
+    return asJsonMap(res);
+  }
+
+  // ── Apply job ──────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> applyJob(
+    String jobId, {
+    required String cvUrl,
+    String? coverNote,
+  }) async {
+    final body = <String, dynamic>{'cv_url': cvUrl};
+    if (coverNote != null && coverNote.trim().isNotEmpty) {
+      body['cover_note'] = coverNote.trim();
+    }
+    final res = await ApiClient.post('/api/jobs/$jobId/apply', body: body);
+    return asJsonMap(res);
+  }
+
   // ── My Jobs (created by current user) ──────────────────────────────────
   static Future<List<Map<String, dynamic>>> getMyJobs() async {
     final res = await ApiClient.get('/api/jobs/my-jobs/all');
     return asJsonMapList(res);
+  }
+
+  // ── Job Applicants (for poster) ────────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getJobApplicants(String jobId) async {
+    final res = await ApiClient.get('/api/jobs/$jobId/applicants');
+    return asJsonMapList(res);
+  }
+
+  // ── Update Application Status ──────────────────────────────────────────
+  static Future<Map<String, dynamic>> updateApplicationStatus(
+    String applicationId,
+    String status,
+  ) async {
+    final res = await ApiClient.put(
+      '/api/jobs/applications/$applicationId/status',
+      body: {'status': status},
+    );
+    return asJsonMap(res);
   }
 
   // ── Update Job ─────────────────────────────────────────────────────────

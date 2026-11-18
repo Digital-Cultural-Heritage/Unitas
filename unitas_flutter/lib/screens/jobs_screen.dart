@@ -1,9 +1,14 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
+import '../core/api/auth_service.dart';
 import '../core/api/jobs_service.dart';
+import '../core/utils/pdf_picker.dart';
+import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
+import 'chat_room_screen.dart';
 import 'create_job_screen.dart';
 import 'manage_job_screen.dart';
 
@@ -16,10 +21,12 @@ class JobsScreen extends StatefulWidget {
 class _JobsScreenState extends State<JobsScreen> {
   String _filter = 'Semua';
   String _searchQuery = '';
+  String? _myUserId;
   final _searchCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<Map<String, dynamic>> _jobs = [];
   final Set<String> _savedIds = {};
+  final Map<String, String> _appliedStatusByJobId = {};
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
@@ -32,14 +39,23 @@ class _JobsScreenState extends State<JobsScreen> {
     {'label': 'Magang', 'icon': Icons.school_outlined},
     {'label': 'Remote', 'icon': Icons.laptop_mac_outlined},
     {'label': 'Tersimpan', 'icon': Icons.bookmark_outline},
+    {'label': 'Lamaran Saya', 'icon': Icons.assignment_turned_in_outlined},
   ];
 
   @override
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
+    _initUser();
     _load();
     _loadSavedIds();
+  }
+
+  Future<void> _initUser() async {
+    final user = await AuthService.getStoredUser();
+    if (mounted && user != null) {
+      setState(() => _myUserId = user['id']?.toString());
+    }
   }
 
   void _onScroll() {
@@ -72,6 +88,29 @@ class _JobsScreenState extends State<JobsScreen> {
   bool _error = false;
   int _autoFillPages = 0;
 
+  bool _matchesTypeFilter(Map<String, dynamic> job) {
+    if (_filter == 'Semua' || _filter == 'Remote') return true;
+    final jt = (job['job_type'] ?? '').toString();
+    if (_filter == 'Magang') {
+      return jt == 'Magang' || jt == 'Internship';
+    }
+    return jt == _filter;
+  }
+
+  Future<void> _syncAppliedStatuses() async {
+    try {
+      final applied = await JobsService.getAppliedJobs();
+      if (!mounted) return;
+      setState(() {
+        _appliedStatusByJobId.clear();
+        for (final j in applied) {
+          final id = j['id']?.toString() ?? '';
+          final st = j['application_status']?.toString() ?? 'pending';
+          if (id.isNotEmpty) _appliedStatusByJobId[id] = st;
+        }
+      });
+    } catch (_) {}
+  }
   Future<void> _load() async {
     final epoch = ++_loadEpoch;
     _autoFillPages = 0;
@@ -83,30 +122,62 @@ class _JobsScreenState extends State<JobsScreen> {
       _hasMore = true;
     });
     try {
-      final isRemote = _filter == 'Remote' ? true : null;
       if (_filter == 'Tersimpan') {
-        final saved = await JobsService.getSavedJobs();
+        final results = await Future.wait([
+          JobsService.getSavedJobs(),
+          JobsService.getAppliedJobs().catchError((_) => <Map<String, dynamic>>[]),
+        ]);
+        final saved = results[0];
+        final applied = results[1];
         if (mounted && epoch == _loadEpoch) {
           setState(() {
             _jobs = saved;
             _hasMore = false;
-            _savedIds.addAll(saved.map((j) => j['id']?.toString() ?? ''));
+            _savedIds.addAll(saved.map((j) => j['id']?.toString() ?? '').where((id) => id.isNotEmpty));
+            _appliedStatusByJobId.clear();
+            for (final j in applied) {
+              final id = j['id']?.toString() ?? '';
+              if (id.isNotEmpty) {
+                _appliedStatusByJobId[id] = j['application_status']?.toString() ?? 'pending';
+              }
+            }
+            _loading = false;
+          });
+        }
+      } else if (_filter == 'Lamaran Saya') {
+        final applied = await JobsService.getAppliedJobs();
+        if (mounted && epoch == _loadEpoch) {
+          setState(() {
+            _jobs = applied;
+            _hasMore = false;
+            _appliedStatusByJobId.clear();
+            for (final j in applied) {
+              final id = j['id']?.toString() ?? '';
+              if (id.isNotEmpty) {
+                _appliedStatusByJobId[id] = j['application_status']?.toString() ?? 'pending';
+              }
+            }
             _loading = false;
           });
         }
       } else {
-        final jobs = await JobsService.getJobs(isRemote: isRemote, page: 1);
+        final isRemote = _filter == 'Remote' ? true : null;
+        final results = await Future.wait([
+          JobsService.getJobs(isRemote: isRemote, page: 1),
+          JobsService.getAppliedJobs().catchError((_) => <Map<String, dynamic>>[]),
+        ]);
+        final jobs = results[0];
+        final applied = results[1];
         if (mounted && epoch == _loadEpoch) {
           setState(() {
             _hasMore = jobs.length >= 20;
-            if (_filter != 'Semua' && _filter != 'Remote') {
-              _jobs = jobs
-                  .where((j) =>
-                      j['job_type'] == _filter ||
-                      (_filter == 'Magang' && j['job_type'] == 'Internship'))
-                  .toList();
-            } else {
-              _jobs = jobs;
+            _jobs = jobs.where(_matchesTypeFilter).toList();
+            _appliedStatusByJobId.clear();
+            for (final j in applied) {
+              final id = j['id']?.toString() ?? '';
+              if (id.isNotEmpty) {
+                _appliedStatusByJobId[id] = j['application_status']?.toString() ?? 'pending';
+              }
             }
             _loading = false;
           });
@@ -127,7 +198,7 @@ class _JobsScreenState extends State<JobsScreen> {
   /// ambil halaman berikutnya (dibatasi) agar filter tidak tampak kosong.
   void _maybeAutoFill() {
     if (!_hasMore || _autoFillPages >= 4) return;
-    if (_filter == 'Semua' || _filter == 'Remote' || _filter == 'Tersimpan') return;
+    if (_filter == 'Semua' || _filter == 'Remote' || _filter == 'Tersimpan' || _filter == 'Lamaran Saya') return;
     if (_jobs.length >= 6) return;
     _autoFillPages++;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -136,7 +207,13 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Future<void> _loadMore() async {
-    if (_loadingMore || !_hasMore || _loading || _filter == 'Tersimpan') return;
+    if (_loadingMore ||
+        !_hasMore ||
+        _loading ||
+        _filter == 'Tersimpan' ||
+        _filter == 'Lamaran Saya') {
+      return;
+    }
     final epoch = _loadEpoch;
     setState(() => _loadingMore = true);
     try {
@@ -145,13 +222,7 @@ class _JobsScreenState extends State<JobsScreen> {
       final more = await JobsService.getJobs(isRemote: isRemote, page: nextPage);
       if (mounted && epoch == _loadEpoch) {
         setState(() {
-          final filtered = (_filter != 'Semua' && _filter != 'Remote')
-              ? more
-                  .where((j) =>
-                      j['job_type'] == _filter ||
-                      (_filter == 'Magang' && j['job_type'] == 'Internship'))
-                  .toList()
-              : more;
+          final filtered = more.where(_matchesTypeFilter).toList();
           _jobs = [..._jobs, ...filtered];
           _page = nextPage;
           _hasMore = more.length >= 20;
@@ -206,6 +277,26 @@ class _JobsScreenState extends State<JobsScreen> {
     }).toList();
   }
 
+  Map<String, dynamic>? _posterProfile(Map<String, dynamic> job) {
+    final poster = job['poster'];
+    if (poster is! Map) return null;
+    final profiles = poster['user_profiles'];
+    if (profiles is List && profiles.isNotEmpty) {
+      return Map<String, dynamic>.from(profiles.first as Map);
+    }
+    if (profiles is Map) {
+      return Map<String, dynamic>.from(profiles);
+    }
+    return null;
+  }
+
+  String _initialsFromName(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.isNotEmpty) return parts[0][0].toUpperCase();
+    return 'A';
+  }
+
   static const List<Color> _logoColors = [
     Color(0xFF1A5C2E),
     Color(0xFF1A5C1A),
@@ -255,6 +346,65 @@ class _JobsScreenState extends State<JobsScreen> {
     final t = job['tags'];
     if (t is List) return t.map((e) => e.toString()).toList();
     return [];
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'reviewed':
+        return 'Direview Alumni';
+      case 'referred':
+        return 'Diteruskan ke HR ✓';
+      case 'rejected':
+        return 'Belum Cocok';
+      default:
+        return 'Menunggu Review';
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'reviewed':
+        return const Color(0xFF1D4ED8);
+      case 'referred':
+        return brandGreen;
+      case 'rejected':
+        return const Color(0xFFDC2626);
+      default:
+        return const Color(0xFFB45309);
+    }
+  }
+
+  Widget _statusBadge(String status) {
+    final color = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        _statusLabel(status),
+        style: caption.copyWith(color: color, fontWeight: FontWeight.w700, fontSize: 11.5),
+      ),
+    );
+  }
+
+  Future<void> _openExternalUrl(String rawUrl) async {
+    final normalized = rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
+        ? rawUrl
+        : 'https://$rawUrl';
+    final uri = Uri.tryParse(normalized);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      await Clipboard.setData(ClipboardData(text: rawUrl));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Link disalin ke clipboard')),
+        );
+      }
+    }
   }
 
   @override
@@ -471,19 +621,29 @@ class _JobsScreenState extends State<JobsScreen> {
                                 color: brandGold.withValues(alpha: 0.16),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.work_outline, color: brandNavy, size: 30),
+                              child: Icon(
+                                _filter == 'Lamaran Saya'
+                                    ? Icons.assignment_turned_in_outlined
+                                    : Icons.work_outline,
+                                color: brandNavy,
+                                size: 30,
+                              ),
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              hasFilter ? 'Tidak ada lowongan yang cocok' : 'Belum ada lowongan tersedia',
+                              _filter == 'Lamaran Saya'
+                                  ? 'Belum ada lamaran dikirim'
+                                  : (hasFilter ? 'Tidak ada lowongan yang cocok' : 'Belum ada lowongan tersedia'),
                               style: subTitle.copyWith(fontSize: 16),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              hasFilter
-                                  ? 'Coba ubah kata kunci pencarian atau pilih tipe pekerjaan lainnya.'
-                                  : 'Bagikan info lowongan kerja atau magang dari perusahaanmu untuk sesama alumni!',
+                              _filter == 'Lamaran Saya'
+                                  ? 'Kirim lamaran dengan CV PDF ke lowongan dari alumni untuk melacak statusnya di sini.'
+                                  : (hasFilter
+                                      ? 'Coba ubah kata kunci pencarian atau pilih tipe pekerjaan lainnya.'
+                                      : 'Bagikan info lowongan kerja atau magang dari perusahaanmu untuk sesama alumni!'),
                               style: caption.copyWith(color: dim1, height: 1.45),
                               textAlign: TextAlign.center,
                             ),
@@ -493,18 +653,19 @@ class _JobsScreenState extends State<JobsScreen> {
                               runSpacing: 10,
                               alignment: WrapAlignment.center,
                               children: [
-                                ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: brandNavy,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    elevation: 0,
+                                if (_filter != 'Lamaran Saya')
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: brandNavy,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      elevation: 0,
+                                    ),
+                                    onPressed: _openCreateJob,
+                                    icon: const Icon(Icons.add, size: 17),
+                                    label: Text('Pasang Lowongan', style: buttonStyle),
                                   ),
-                                  onPressed: _openCreateJob,
-                                  icon: const Icon(Icons.add, size: 17),
-                                  label: Text('Pasang Lowongan', style: buttonStyle),
-                                ),
                                 if (hasFilter)
                                   OutlinedButton(
                                     style: OutlinedButton.styleFrom(
@@ -522,7 +683,7 @@ class _JobsScreenState extends State<JobsScreen> {
                                       _load();
                                     },
                                     child: Text(
-                                      'Reset Filter',
+                                      'Lihat Semua Lowongan',
                                       style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
                                     ),
                                   ),
@@ -543,6 +704,15 @@ class _JobsScreenState extends State<JobsScreen> {
                             final isSaved = _savedIds.contains(id);
                             final tags = _tags(job);
                             final jobType = _str(job, 'job_type', 'Full-time');
+                            final posterProf = _posterProfile(job);
+                            final posterName = (posterProf?['full_name'] ?? '').toString().trim();
+                            final posterProdi = (posterProf?['prodi'] ?? '').toString().trim();
+                            final posterAngkatan = (posterProf?['angkatan'] ?? '').toString().trim();
+                            final isOwner = _myUserId != null &&
+                                job['poster_id']?.toString() == _myUserId;
+                            final appStatus = _appliedStatusByJobId[id] ??
+                                job['application_status']?.toString();
+
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
@@ -557,130 +727,174 @@ class _JobsScreenState extends State<JobsScreen> {
                                   ),
                                 ],
                               ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Container(
-                                          width: 48,
-                                          height: 48,
-                                          decoration: BoxDecoration(
-                                            color: _colorFor(i),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            _logoText(job),
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 16,
+                              child: InkWell(
+                                onTap: () => _showJobDetailSheet(job, posterProf),
+                                borderRadius: BorderRadius.circular(16),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Container(
+                                            width: 48,
+                                            height: 48,
+                                            decoration: BoxDecoration(
+                                              color: _colorFor(i),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              _logoText(job),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 16,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                _str(job, 'title', '—'),
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: subTitle.copyWith(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: brandNavy,
+                                          const SizedBox(width: 14),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  _str(job, 'title', '—'),
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: subTitle.copyWith(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: brandNavy,
+                                                  ),
                                                 ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                _str(job, 'company'),
-                                                style: body.copyWith(fontWeight: FontWeight.w500, color: dim1),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        InkWell(
-                                          onTap: () => _toggleSave(id),
-                                          borderRadius: BorderRadius.circular(8),
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(4),
-                                            child: Icon(
-                                              isSaved ? Icons.bookmark : Icons.bookmark_border,
-                                              color: isSaved ? brandNavy : dim2,
-                                              size: 24,
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  _str(job, 'company'),
+                                                  style: body.copyWith(fontWeight: FontWeight.w500, color: dim1),
+                                                ),
+                                              ],
                                             ),
                                           ),
+                                          InkWell(
+                                            onTap: () => _toggleSave(id),
+                                            borderRadius: BorderRadius.circular(8),
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(4),
+                                              child: Icon(
+                                                isSaved ? Icons.bookmark : Icons.bookmark_border,
+                                                color: isSaved ? brandNavy : dim2,
+                                                size: 24,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (posterName.isNotEmpty) ...[
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.verified_user_outlined, size: 13, color: brandNavy),
+                                            const SizedBox(width: 5),
+                                            Expanded(
+                                              child: Text(
+                                                'Info dari $posterName${posterProdi.isNotEmpty || posterAngkatan.isNotEmpty ? " · ${[posterProdi, posterAngkatan].where((x) => x.isNotEmpty).join(" '")}" : ""}',
+                                                style: caption.copyWith(
+                                                  color: brandNavy,
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
-                                    ),
-                                    const SizedBox(height: 14),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        _infoChip(Icons.location_on_outlined, _str(job, 'location', 'Lokasi tidak disebutkan')),
-                                        _infoChip(Icons.work_outline, jobType),
-                                        _infoChip(Icons.attach_money, _salary(job)),
-                                      ],
-                                    ),
-                                    if (tags.isNotEmpty) ...[
                                       const SizedBox(height: 12),
                                       Wrap(
-                                        spacing: 6,
-                                        runSpacing: 6,
-                                        children: tags
-                                            .map(
-                                              (tag) => Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                decoration: BoxDecoration(
-                                                  color: card,
-                                                  borderRadius: BorderRadius.circular(8),
-                                                ),
-                                                child: Text(
-                                                  tag,
-                                                  style: caption.copyWith(color: dim1, fontWeight: FontWeight.w500),
-                                                ),
-                                              ),
-                                            )
-                                            .toList(),
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          _infoChip(Icons.location_on_outlined, _str(job, 'location', 'Lokasi tidak disebutkan')),
+                                          _infoChip(Icons.work_outline, jobType),
+                                          _infoChip(Icons.attach_money, _salary(job)),
+                                        ],
                                       ),
-                                    ],
-                                    const SizedBox(height: 14),
-                                    const Divider(height: 1, color: Color(0x1A1E3A5F)),
-                                    const SizedBox(height: 12),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            _timeAgo(job['created_at']?.toString()),
-                                            style: caption.copyWith(color: dim2),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: brandNavy,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                            elevation: 0,
-                                          ),
-                                          onPressed: () {
-                                            _showApplySheet(job);
-                                          },
-                                          child: const Text('Lamar Sekarang', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      if (tags.isNotEmpty) ...[
+                                        const SizedBox(height: 12),
+                                        Wrap(
+                                          spacing: 6,
+                                          runSpacing: 6,
+                                          children: tags
+                                              .map(
+                                                (tag) => Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: card,
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: Text(
+                                                    tag,
+                                                    style: caption.copyWith(color: dim1, fontWeight: FontWeight.w500),
+                                                  ),
+                                                ),
+                                              )
+                                              .toList(),
                                         ),
                                       ],
-                                    ),
-                                  ],
+                                      const SizedBox(height: 14),
+                                      const Divider(height: 1, color: Color(0x1A1E3A5F)),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              _filter == 'Lamaran Saya' && job['applied_at'] != null
+                                                  ? 'Dilamar ${_timeAgo(job['applied_at']?.toString())}'
+                                                  : _timeAgo(job['created_at']?.toString()),
+                                              style: caption.copyWith(color: dim2),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          if (isOwner)
+                                            OutlinedButton(
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: brandNavy,
+                                                side: BorderSide(color: borderColor),
+                                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              ),
+                                              onPressed: () async {
+                                                await Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(builder: (_) => const ManageJobScreen()),
+                                                );
+                                                _load();
+                                              },
+                                              child: const Text('Kelola Loker', style: TextStyle(fontWeight: FontWeight.w600)),
+                                            )
+                                          else if (appStatus != null)
+                                            _statusBadge(appStatus)
+                                          else
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: brandNavy,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                                elevation: 0,
+                                              ),
+                                              onPressed: () => _showApplySheet(job),
+                                              child: const Text('Lamar Sekarang', style: TextStyle(fontWeight: FontWeight.bold)),
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             );
@@ -729,77 +943,503 @@ class _JobsScreenState extends State<JobsScreen> {
     );
   }
 
-  void _showApplySheet(Map<String, dynamic> job) {
-    final applyUrl = job['apply_url']?.toString().trim() ?? '';
-    final contactEmail = job['contact_email']?.toString().trim() ?? '';
+  void _showJobDetailSheet(Map<String, dynamic> job, Map<String, dynamic>? posterProf) {
+    final id = job['id']?.toString() ?? '';
     final title = job['title']?.toString() ?? 'Lowongan';
     final company = job['company']?.toString() ?? '';
+    final location = job['location']?.toString() ?? '';
+    final jobType = job['job_type']?.toString() ?? 'Full-time';
+    final desc = job['description']?.toString().trim() ?? '';
+    final applyUrl = job['apply_url']?.toString().trim() ?? '';
+    final contactEmail = job['contact_email']?.toString().trim() ?? '';
+    final posterId = job['poster_id']?.toString() ?? '';
+    final posterName = (posterProf?['full_name'] ?? 'Alumni Unitas').toString();
+    final posterAvatar = posterProf?['avatar_url']?.toString();
+    final posterJob = [posterProf?['pekerjaan'], posterProf?['perusahaan']]
+        .where((e) => e != null && e.toString().trim().isNotEmpty)
+        .join(' · ');
+    final isOwner = _myUserId != null && posterId == _myUserId;
+    final appStatus = _appliedStatusByJobId[id] ?? job['application_status']?.toString();
+    final cvUrl = job['cv_url']?.toString();
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Lamar: $title'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (company.isNotEmpty) ...[
-              Text(company, style: subTitle),
-              const SizedBox(height: 10),
-            ],
-            if (applyUrl.isEmpty && contactEmail.isEmpty)
-              Text(
-                'Pembuat lowongan belum mencantumkan link atau email lamaran. Kamu bisa menghubungi alumni terkait melalui tab Alumni.',
-                style: body.copyWith(fontSize: 13),
-              ),
-            if (applyUrl.isNotEmpty) ...[
-              Text('Link Lamaran:', style: label),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(applyUrl, style: body.copyWith(color: brandNavy, fontSize: 13)),
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 14, 22, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: dim3, borderRadius: BorderRadius.circular(99)),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.copy, size: 18),
-                    tooltip: 'Salin link',
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: applyUrl));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Link lamaran disalin')),
-                      );
-                    },
+                ),
+                const SizedBox(height: 16),
+                Text(title, style: heading.copyWith(fontSize: 20)),
+                const SizedBox(height: 4),
+                Text(company, style: subTitle.copyWith(color: dim1)),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _infoChip(Icons.location_on_outlined, location),
+                    _infoChip(Icons.work_outline, jobType),
+                    _infoChip(Icons.attach_money, _salary(job)),
+                  ],
+                ),
+                if (posterId.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Row(
+                      children: [
+                        UnitasAvatar(
+                          initials: _initialsFromName(posterName),
+                          color: brandNavy,
+                          size: 42,
+                          avatarUrl: posterAvatar,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Dibagikan oleh Alumni', style: caption.copyWith(fontSize: 11)),
+                              Text(posterName, style: subTitle.copyWith(fontSize: 14)),
+                              if (posterJob.isNotEmpty)
+                                Text(posterJob, style: caption, overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                        if (!isOwner)
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: brandNavy,
+                              side: BorderSide(color: borderColor),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ChatRoomScreen(
+                                    peerId: posterId,
+                                    peerName: posterName,
+                                    peerInitials: _initialsFromName(posterName),
+                                    peerAvatarUrl: posterAvatar,
+                                    peerSubtitle: posterJob.isNotEmpty ? posterJob : company,
+                                  ),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.chat_bubble_outline, size: 15),
+                            label: const Text('Tanya'),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 8),
-            ],
-            if (contactEmail.isNotEmpty) ...[
-              Text('Email Rekruter:', style: label),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(contactEmail, style: body.copyWith(color: brandNavy, fontSize: 13)),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.copy, size: 18),
-                    tooltip: 'Salin email',
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: contactEmail));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Email rekruter disalin')),
-                      );
-                    },
+                const SizedBox(height: 16),
+                Text('Deskripsi Pekerjaan', style: label),
+                const SizedBox(height: 6),
+                Text(
+                  desc.isNotEmpty ? desc : 'Tidak ada deskripsi tambahan.',
+                  style: body.copyWith(height: 1.55, color: desc.isEmpty ? dim2 : textPrimary),
+                ),
+                if (applyUrl.isNotEmpty || contactEmail.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Jalur Eksternal Perusahaan', style: label),
+                  const SizedBox(height: 6),
+                  if (applyUrl.isNotEmpty)
+                    InkWell(
+                      onTap: () => _openExternalUrl(applyUrl),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.open_in_new, size: 16, color: brandNavy),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                applyUrl,
+                                style: caption.copyWith(
+                                  color: brandNavy,
+                                  decoration: TextDecoration.underline,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (contactEmail.isNotEmpty)
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: contactEmail));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Email rekruter disalin')),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.email_outlined, size: 16, color: brandNavy),
+                            const SizedBox(width: 6),
+                            Expanded(child: Text(contactEmail, style: caption.copyWith(color: brandNavy))),
+                            const Icon(Icons.copy, size: 14, color: dim2),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+                if (cvUrl != null && cvUrl.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    onPressed: () => _openExternalUrl(cvUrl),
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                    label: const Text('Lihat CV yang Dikirim'),
                   ),
                 ],
-              ),
-            ],
-          ],
+                const SizedBox(height: 20),
+                if (!isOwner)
+                  if (appStatus != null)
+                    Row(
+                      children: [
+                        Text('Status Lamaran: ', style: label),
+                        const SizedBox(width: 8),
+                        _statusBadge(appStatus),
+                      ],
+                    )
+                  else
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: brandNavy,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showApplySheet(job);
+                        },
+                        child: const Text('Lamar Sekarang (Upload CV)', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+              ],
+            ),
+          ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup')),
-        ],
+      ),
+    );
+  }
+
+  void _showApplySheet(Map<String, dynamic> job) {
+    final jobId = job['id']?.toString() ?? '';
+    final title = job['title']?.toString() ?? 'Lowongan';
+    final company = job['company']?.toString() ?? '';
+    final applyUrl = job['apply_url']?.toString().trim() ?? '';
+    final contactEmail = job['contact_email']?.toString().trim() ?? '';
+
+    final linkCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    PickedPdf? pickedPdf;
+    bool submitting = false;
+    String? errorMsg;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              22,
+              16,
+              22,
+              MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: dim3, borderRadius: BorderRadius.circular(99)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text('Lamar: $title', style: heading.copyWith(fontSize: 18)),
+                if (company.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(company, style: caption.copyWith(color: dim1)),
+                ],
+                const SizedBox(height: 16),
+
+                // Upload PDF CV (kompres otomatis & maks 1 MB)
+                Text('Upload CV (PDF, kompres otomatis & maks 1 MB)', style: label),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: submitting
+                      ? null
+                      : () async {
+                          try {
+                            final f = await PdfPicker.pickPdf();
+                            if (f == null) return;
+                            if (!f.name.toLowerCase().endsWith('.pdf')) {
+                              setSheetState(() => errorMsg = 'Format CV harus berupa file PDF (.pdf).');
+                              return;
+                            }
+                            if (f.bytes.isEmpty) {
+                              setSheetState(() => errorMsg = 'Gagal membaca file PDF.');
+                              return;
+                            }
+                            if (f.bytes.length > 4 * 1024 * 1024) {
+                              setSheetState(() => errorMsg = 'Ukuran PDF awal maksimal 4 MB.');
+                              return;
+                            }
+                            setSheetState(() {
+                              pickedPdf = f;
+                              errorMsg = null;
+                            });
+                          } catch (e) {
+                            setSheetState(() {
+                              errorMsg = 'Gagal membuka pemilih file: $e';
+                            });
+                          }
+                        },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: pickedPdf != null ? brandNavy : borderColor,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          pickedPdf != null ? Icons.picture_as_pdf : Icons.upload_file_outlined,
+                          color: brandNavy,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                pickedPdf != null ? pickedPdf!.name : 'Pilih file CV (.pdf)',
+                                style: subTitle.copyWith(fontSize: 13.5),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                pickedPdf != null
+                                    ? '${(pickedPdf!.bytes.length / 1024).ceil()} KB · Siap dikompresi & diunggah'
+                                    : 'Otomatis dikompres di server, hasil akhir maks 1 MB',
+                                style: caption.copyWith(fontSize: 11.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (pickedPdf != null)
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18, color: dim2),
+                            onPressed: submitting
+                                ? null
+                                : () => setSheetState(() {
+                                      pickedPdf = null;
+                                    }),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                Text('Atau Link CV / LinkedIn (opsional jika sudah upload PDF)', style: caption),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: linkCtrl,
+                  enabled: !submitting,
+                  keyboardType: TextInputType.url,
+                  decoration: InputDecoration(
+                    hintText: 'https://drive.google.com/... atau linkedin.com/in/...',
+                    filled: true,
+                    fillColor: surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+                Text('Catatan untuk Alumni (opsional)', style: label),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: noteCtrl,
+                  enabled: !submitting,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: 'Ceritakan singkat pengalamanmu atau alasan tertarik posisi ini…',
+                    filled: true,
+                    fillColor: surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+
+                if (applyUrl.isNotEmpty || contactEmail.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: brandGold.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Info Rekrutmen Resmi:', style: caption.copyWith(fontWeight: FontWeight.w600, color: brandNavy)),
+                        if (applyUrl.isNotEmpty) Text('Link: $applyUrl', style: caption),
+                        if (contactEmail.isNotEmpty) Text('Email: $contactEmail', style: caption),
+                      ],
+                    ),
+                  ),
+                ],
+
+                if (errorMsg != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errorMsg!, style: caption.copyWith(color: const Color(0xFFDC2626))),
+                ],
+
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: brandNavy,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    onPressed: submitting
+                        ? null
+                        : () async {
+                            final link = linkCtrl.text.trim();
+                            if (pickedPdf == null && link.isEmpty) {
+                              setSheetState(() {
+                                errorMsg = 'Upload file PDF CV atau isi link CV terlebih dahulu.';
+                              });
+                              return;
+                            }
+                            setSheetState(() {
+                              submitting = true;
+                              errorMsg = null;
+                            });
+                            try {
+                              String finalCvUrl = link;
+                              String? sizeNote;
+                              if (pickedPdf != null) {
+                                final uploadRes = await JobsService.uploadCv(
+                                  bytes: pickedPdf!.bytes,
+                                  filename: pickedPdf!.name,
+                                );
+                                finalCvUrl = uploadRes['url']?.toString() ?? '';
+                                final finalBytes = (uploadRes['size_bytes'] as num?)?.toInt();
+                                if (finalBytes != null) {
+                                  sizeNote = ' (${(finalBytes / 1024).ceil()} KB)';
+                                }
+                              }
+
+                              await JobsService.applyJob(
+                                jobId,
+                                cvUrl: finalCvUrl,
+                                coverNote: noteCtrl.text.trim(),
+                              );
+
+                              if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                              if (mounted) {
+                                setState(() {
+                                  _appliedStatusByJobId[jobId] = 'pending';
+                                });
+                                _syncAppliedStatuses();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Lamaran & CV${sizeNote ?? ''} berhasil dikirim ke alumni!'),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              setSheetState(() {
+                                submitting = false;
+                                errorMsg = e.toString().replaceFirst('Exception: ', '');
+                              });
+                            }
+                          },
+                    child: submitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Text('Kirim Lamaran ke Alumni', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -815,9 +1455,9 @@ class _JobsScreenState extends State<JobsScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: dim1),
+          Icon(icon, size: 12, color: dim1),
           const SizedBox(width: 4),
-          Text(label, style: caption.copyWith(color: dim1, fontWeight: FontWeight.w500)),
+          Text(label, style: caption.copyWith(fontSize: 11.5, color: dim1)),
         ],
       ),
     );

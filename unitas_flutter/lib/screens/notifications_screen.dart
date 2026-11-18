@@ -121,6 +121,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return Icons.how_to_reg;
       case 'event_reminder':
         return Icons.event;
+      case 'job_application':
+        return Icons.work;
+      case 'job_status':
+        return Icons.assignment_turned_in;
       default:
         return Icons.notifications;
     }
@@ -137,6 +141,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return brandGreen;
       case 'event_reminder':
         return brandGold;
+      case 'job_application':
+        return brandNavy;
+      case 'job_status':
+        return brandGreen;
       default:
         return dim1;
     }
