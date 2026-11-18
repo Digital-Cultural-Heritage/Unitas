@@ -32,6 +32,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   List<Map<String, dynamic>> _messages = [];
   String? _myId;
   bool _loading = true;
+  bool _error = false;
   bool _sending = false;
   Timer? _pollTimer;
 
@@ -46,12 +47,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _init();
-    _startPolling();
   }
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _loadMessages(silent: true));
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+      if (isCurrent) {
+        _loadMessages(silent: true);
+      }
+    });
   }
 
   @override
@@ -59,7 +65,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     if (state == AppLifecycleState.resumed) {
       _loadMessages(silent: true);
       _startPolling();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
       _pollTimer?.cancel();
     }
   }
@@ -75,29 +83,72 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   Future<void> _init() async {
     final user = await AuthService.getStoredUser();
+    if (!mounted) return;
     _myId = user?['id']?.toString();
     await _loadMessages();
+    if (mounted) _startPolling();
+  }
+
+  bool _fetching = false; // cegah request polling menumpuk
+  int _sendEpoch = 0; // respons polling lama diabaikan jika ada pesan baru terkirim
+
+  bool _messagesChanged(List<Map<String, dynamic>> next) {
+    if (next.length != _messages.length) return true;
+    for (var i = 0; i < next.length; i++) {
+      if (next[i]['id']?.toString() != _messages[i]['id']?.toString() ||
+          next[i]['is_read'] != _messages[i]['is_read']) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isNearBottom() {
+    if (!_scrollCtrl.hasClients) return true;
+    final pos = _scrollCtrl.position;
+    return (pos.maxScrollExtent - pos.pixels) <= 160;
   }
 
   Future<void> _loadMessages({bool silent = false}) async {
+    if (_fetching) return;
+    _fetching = true;
+    final epoch = _sendEpoch;
+    if (!silent && mounted && (_error || !_loading)) {
+      setState(() {
+        _loading = true;
+        _error = false;
+      });
+    }
     try {
       final list = await MessagesService.getMessages(widget.peerId);
-      if (mounted) {
-        final shouldScroll = !silent || list.length > _messages.length;
+      if (mounted && epoch == _sendEpoch) {
+        final changed = _messagesChanged(list);
+        if (silent && !changed && !_loading && !_error) return;
+        final wasEmptyOrInitial = !silent || _messages.isEmpty;
+        final hasNew = list.length > _messages.length;
+        final shouldScroll = wasEmptyOrInitial || (hasNew && _isNearBottom());
         setState(() {
           _messages = list;
           _loading = false;
+          _error = false;
         });
         if (shouldScroll) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollCtrl.hasClients) {
+            if (mounted && _scrollCtrl.hasClients) {
               _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
             }
           });
         }
       }
     } catch (_) {
-      if (mounted && !silent) setState(() => _loading = false);
+      if (mounted && !silent) {
+        setState(() {
+          _loading = false;
+          _error = _messages.isEmpty;
+        });
+      }
+    } finally {
+      _fetching = false;
     }
   }
 
@@ -107,22 +158,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     setState(() => _sending = true);
     try {
       final sent = await MessagesService.sendMessage(widget.peerId, text);
+      if (!mounted) return;
+      _sendEpoch++;
       if (preset == null) _msgCtrl.clear();
-      if (mounted) {
-        setState(() {
-          _messages = [..._messages, sent];
-          _sending = false;
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollCtrl.hasClients) {
-            _scrollCtrl.animateTo(
-              _scrollCtrl.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-            );
-          }
-        });
-      }
+      setState(() {
+        _messages = [..._messages, sent];
+        _sending = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(
+            _scrollCtrl.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     } catch (e) {
       if (mounted) {
         setState(() => _sending = false);
@@ -217,7 +268,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                 constraints: const BoxConstraints(maxWidth: 600),
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
-                    : _messages.isEmpty
+                    : _error && _messages.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.wifi_off_rounded, size: 40, color: dim2),
+                                  const SizedBox(height: 12),
+                                  Text('Gagal memuat pesan', style: subTitle),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Periksa koneksi internetmu lalu coba lagi.',
+                                    style: caption,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  OutlinedButton(
+                                    onPressed: () => _loadMessages(),
+                                    child: const Text('Coba lagi'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : _messages.isEmpty
                         ? Center(
                             child: Padding(
                               padding: const EdgeInsets.all(24),

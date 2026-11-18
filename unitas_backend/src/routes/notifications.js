@@ -1,16 +1,19 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { uuidParam, parsePagination } = require("../lib/validate");
 
 const router = express.Router();
+
+router.param("id", uuidParam);
 
 // ── GET /api/notifications ────────────────────────────────────────────────
 router.get("/", requireAuth, async (req, res, next) => {
   try {
-    const { limit = 30 } = req.query;
+    const { offset, to } = parsePagination(req.query, { defaultLimit: 30, maxLimit: 100 });
     const userId = req.user.userId;
 
-    const [{ data, error }, { count: unreadCount }] = await Promise.all([
+    const [listRes, unreadRes] = await Promise.all([
       supabase
         .from("notifications")
         .select(`
@@ -19,16 +22,17 @@ router.get("/", requireAuth, async (req, res, next) => {
         `)
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(Number(limit)),
+        .range(offset, to),
       supabase
         .from("notifications")
-        .select("*", { count: "exact", head: true })
+        .select("id", { count: "exact", head: true })
         .eq("user_id", userId)
         .eq("is_read", false),
     ]);
 
-    if (error) throw error;
-    res.json({ data: data || [], unread_count: unreadCount || 0 });
+    if (listRes.error) throw listRes.error;
+    if (unreadRes.error) throw unreadRes.error;
+    res.json({ data: listRes.data || [], unread_count: unreadRes.count || 0 });
   } catch (err) {
     next(err);
   }
@@ -52,12 +56,15 @@ router.put("/read-all", requireAuth, async (req, res, next) => {
 // ── PUT /api/notifications/:id/read ───────────────────────────────────────
 router.put("/:id/read", requireAuth, async (req, res, next) => {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("notifications")
       .update({ is_read: true })
       .eq("id", req.params.id)
-      .eq("user_id", req.user.userId);
+      .eq("user_id", req.user.userId)
+      .select("id")
+      .maybeSingle();
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Notifikasi tidak ditemukan" });
     res.json({ message: "Notifikasi ditandai sudah dibaca" });
   } catch (err) {
     next(err);

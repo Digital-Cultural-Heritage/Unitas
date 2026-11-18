@@ -16,11 +16,23 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  static const List<Color> _avatarColors = [
+    Color(0xFF1E3A5F),
+    Color(0xFF2E7D32),
+    Color(0xFFC62828),
+    Color(0xFFE65100),
+    Color(0xFF0277BD),
+    Color(0xFF6A1B9A),
+  ];
+
   String _tab = 'tentang';
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _connections = [];
   List<Map<String, dynamic>> _requests = [];
+  final Set<String> _responding = {};
   bool _loading = true;
+  bool _loggingOut = false;
+  String? _error;
   int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
   bool _notifPosts = true;
   bool _notifConnections = true;
@@ -50,6 +62,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _load() async {
+    if (mounted && _profile == null && !_loading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final results = await Future.wait([
         UsersService.getMe(),
@@ -61,26 +79,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _profile = results[0] as Map<String, dynamic>?;
           _connections = results[1] as List<Map<String, dynamic>>;
           _requests = results[2] as List<Map<String, dynamic>>;
+          _error = null;
           _loading = false;
         });
       }
     } catch (_) {
       final stored = await AuthService.getStoredUser();
-      if (mounted) setState(() { _profile = stored; _loading = false; });
+      if (!mounted) return;
+      final hadProfile = _profile != null;
+      setState(() {
+        _profile ??= stored;
+        if (_profile == null) {
+          _error = 'Gagal memuat profil';
+        }
+        _loading = false;
+      });
+      if (hadProfile) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memperbarui profil')),
+        );
+      }
     }
   }
 
   Future<void> _respond(String id, String action) async {
+    if (_responding.contains(id)) return;
+    setState(() => _responding.add(id));
     try {
       await UsersService.respondRequest(id, action);
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal merespons')));
+      if (mounted) _load();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal merespons')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _responding.remove(id));
+      } else {
+        _responding.remove(id);
+      }
     }
   }
 
   Future<void> _logout() async {
+    if (_loggingOut) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -88,11 +132,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: Text('Keluar', style: heading.copyWith(fontSize: 18)),
         content: Text('Apakah kamu yakin ingin keluar?', style: body),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-            child: Text('Batal', style: caption.copyWith(color: dim1))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Batal', style: caption.copyWith(color: dim1)),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white,
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               elevation: 0,
             ),
@@ -102,256 +149,358 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
-    if (confirm == true) {
+    if (confirm != true || !mounted) return;
+    _loggingOut = true;
+    try {
       await AuthService.logout();
-      widget.onLogout();
+      if (mounted) widget.onLogout();
+    } finally {
+      _loggingOut = false;
     }
   }
 
   String _initials(Map<String, dynamic>? p) {
-    final name = p?['full_name'] ?? '';
-    final parts = name.split(' ');
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final name = (p?['full_name'] ?? '').toString().trim();
+    if (name.isEmpty) return '?';
+    final parts = name.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    return name[0].toUpperCase();
+  }
+
+  Map<String, dynamic>? _extractProfileMap(dynamic raw) {
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is List && raw.isNotEmpty && raw.first is Map) {
+      return Map<String, dynamic>.from(raw.first as Map);
+    }
+    return null;
   }
 
   Color _colorFor(String text) {
-    final colors = [
-      const Color(0xFF1E3A5F), const Color(0xFF2E7D32),
-      const Color(0xFFC62828), const Color(0xFFE65100),
-      const Color(0xFF0277BD), const Color(0xFF6A1B9A),
-    ];
     final hash = text.hashCode.abs();
-    return colors[hash % colors.length];
+    return _avatarColors[hash % _avatarColors.length];
   }
 
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final coverCacheW = (600 * dpr).round().clamp(600, 1200);
+    final avatarCacheW = (70 * dpr).round();
+    final avatarUrl = _profile?['avatar_url']?.toString().trim() ?? '';
+    final fullName = (_profile?['full_name'] ?? '').toString().trim();
+    final prodi = (_profile?['prodi'] ?? '').toString().trim();
+    final angkatan = (_profile?['angkatan'] ?? '').toString().trim();
+    final pekerjaan = (_profile?['pekerjaan'] ?? '').toString().trim();
+    final perusahaan = (_profile?['perusahaan'] ?? '').toString().trim();
+    final kota = (_profile?['kota'] ?? '').toString().trim();
+    final jobSummary = [pekerjaan, perusahaan, kota].where((e) => e.isNotEmpty).join(' · ');
+
     return SafeArea(
       bottom: false,
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 600),
-        child: SingleChildScrollView(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Cover
-            Stack(children: [
-              SizedBox(
-                height: 128, width: double.infinity,
-                child: Image.network(
-                  'https://images.unsplash.com/photo-1748144679532-c36d9d5584e6?w=600&h=240&fit=crop',
-                  fit: BoxFit.cover,
-                  color: Colors.black54,
-                  colorBlendMode: BlendMode.darken,
-                ),
-              ),
-              Positioned.fill(child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, brandBg], stops: [0.45, 1.0],
-                  ),
-                ),
-              )),
-              Positioned(
-                top: 12,
-                right: 14,
-                child: SafeArea(
-                  bottom: false,
-                  child: InkWell(
-                    onTap: _openEditProfile,
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.35),
-                        borderRadius: BorderRadius.circular(20),
+        child: RefreshIndicator(
+          onRefresh: _load,
+          color: brandNavy,
+          child: (!_loading && _profile == null && _error != null)
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(32),
+                  children: [
+                    const SizedBox(height: 80),
+                    const Icon(Icons.error_outline, size: 42, color: dim2),
+                    const SizedBox(height: 12),
+                    Text(_error!, style: subTitle, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    Center(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: brandNavy,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          elevation: 0,
+                        ),
+                        onPressed: _load,
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: Text('Coba Lagi', style: buttonStyle),
                       ),
-                      child: const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 16),
                     ),
-                  ),
-                ),
-              ),
-            ]),
-            // Profile section
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-              child: Transform.translate(
-                offset: const Offset(0, -42),
-                child: _loading
-                  ? const ProfileSkeleton()
-                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.end, children: [
-                        // Avatar dengan frame & bayangan lembut
-                        Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF7A4B2B),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: brandBg, width: 3),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x181E3A5F),
-                                blurRadius: 10,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(17),
-                            child: _profile?['avatar_url'] != null && _profile!['avatar_url'].toString().isNotEmpty
-                                ? Image.network(
-                                    '${_profile!['avatar_url']}?v=$_avatarVersion',
-                                    width: 70, height: 70, fit: BoxFit.cover,
-                                    gaplessPlayback: true,
-                                    errorBuilder: (_, _, _) => Center(
-                                      child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
+                  ],
+                )
+              : CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Stack(
+                        children: [
+                          // Cover
+                          SizedBox(
+                            height: 128,
+                            width: double.infinity,
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: Image.network(
+                                    'https://images.unsplash.com/photo-1748144679532-c36d9d5584e6?w=600&h=240&fit=crop',
+                                    fit: BoxFit.cover,
+                                    cacheWidth: coverCacheW,
+                                    color: Colors.black54,
+                                    colorBlendMode: BlendMode.darken,
+                                    errorBuilder: (_, _, _) => Container(color: brandNavy),
+                                  ),
+                                ),
+                                Positioned.fill(
+                                  child: Container(
+                                    decoration: const BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [Colors.transparent, brandBg],
+                                        stops: [0.45, 1.0],
+                                      ),
                                     ),
-                                  )
-                                : Center(
-                                    child: Text(_initials(_profile), style: heading.copyWith(color: Colors.white, fontSize: 20)),
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 12,
+                                  right: 14,
+                                  child: SafeArea(
+                                    bottom: false,
+                                    child: InkWell(
+                                      onTap: _openEditProfile,
+                                      borderRadius: BorderRadius.circular(20),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.35),
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 16),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Profile header section overlapping cover
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(22, 86, 22, 0),
+                            child: _loading
+                                ? const ProfileSkeleton()
+                                : Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          // Avatar dengan frame & bayangan lembut
+                                          Container(
+                                            width: 76,
+                                            height: 76,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF7A4B2B),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(color: brandBg, width: 3),
+                                              boxShadow: const [
+                                                BoxShadow(
+                                                  color: Color(0x181E3A5F),
+                                                  blurRadius: 10,
+                                                  offset: Offset(0, 4),
+                                                ),
+                                              ],
+                                            ),
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(17),
+                                              child: avatarUrl.isNotEmpty
+                                                  ? Image.network(
+                                                      avatarUrl.contains('?')
+                                                          ? '$avatarUrl&v=$_avatarVersion'
+                                                          : '$avatarUrl?v=$_avatarVersion',
+                                                      width: 70,
+                                                      height: 70,
+                                                      cacheWidth: avatarCacheW,
+                                                      fit: BoxFit.cover,
+                                                      gaplessPlayback: true,
+                                                      errorBuilder: (_, _, _) => Center(
+                                                        child: Text(
+                                                          _initials(_profile),
+                                                          style: heading.copyWith(color: Colors.white, fontSize: 20),
+                                                        ),
+                                                      ),
+                                                    )
+                                                  : Center(
+                                                      child: Text(
+                                                        _initials(_profile),
+                                                        style: heading.copyWith(color: Colors.white, fontSize: 20),
+                                                      ),
+                                                    ),
+                                            ),
+                                          ),
+                                          ElevatedButton.icon(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: brandNavy,
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              elevation: 1,
+                                            ),
+                                            onPressed: _openEditProfile,
+                                            icon: const Icon(Icons.edit_outlined, size: 15),
+                                            label: Text('Edit Profil', style: buttonStyle.copyWith(fontSize: 12.5)),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Text(fullName.isNotEmpty ? fullName : '—', style: heading),
+                                      const SizedBox(height: 6),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 6,
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.school_outlined, size: 15, color: dim1),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                prodi.isNotEmpty ? prodi : 'Alumni',
+                                                style: body.copyWith(color: dim1, fontWeight: FontWeight.w500),
+                                              ),
+                                            ],
+                                          ),
+                                          if (angkatan.isNotEmpty)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: surface,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: borderColor),
+                                              ),
+                                              child: Text(
+                                                'Angkatan $angkatan',
+                                                style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600, fontSize: 11),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      if (pekerjaan.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          jobSummary,
+                                          style: body.copyWith(color: dim2),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 18),
+                                      // Stats
+                                      Row(children: [
+                                        {'val': '${_profile?['points'] ?? 0}', 'label': 'Poin', 'icon': Icons.stars_outlined, 'tap': false},
+                                        {'val': '${_connections.length}', 'label': 'Koneksi', 'icon': Icons.people_outline, 'tap': true},
+                                        {'val': '${_profile?['events_count'] ?? 0}', 'label': 'Acara', 'icon': Icons.event_available_outlined, 'tap': false},
+                                      ].asMap().entries.map((e) {
+                                        final i = e.key;
+                                        final s = e.value;
+                                        final canTap = s['tap'] == true;
+                                        return Expanded(
+                                          child: InkWell(
+                                            onTap: canTap ? () => setState(() => _tab = 'koneksi') : null,
+                                            borderRadius: BorderRadius.horizontal(
+                                              left: i == 0 ? const Radius.circular(12) : Radius.zero,
+                                              right: i == 2 ? const Radius.circular(12) : Radius.zero,
+                                            ),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                              decoration: BoxDecoration(
+                                                color: surface,
+                                                border: Border(
+                                                  top: BorderSide(color: borderColor),
+                                                  bottom: BorderSide(color: borderColor),
+                                                  left: BorderSide(color: borderColor),
+                                                  right: i == 2 ? BorderSide(color: borderColor) : BorderSide.none,
+                                                ),
+                                                borderRadius: BorderRadius.horizontal(
+                                                  left: i == 0 ? const Radius.circular(12) : Radius.zero,
+                                                  right: i == 2 ? const Radius.circular(12) : Radius.zero,
+                                                ),
+                                              ),
+                                              child: Column(children: [
+                                                Row(
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    Icon(s['icon'] as IconData, size: 15, color: brandGold),
+                                                    const SizedBox(width: 4),
+                                                    Text(s['val'] as String, style: statStyle.copyWith(fontSize: 19, color: brandNavy)),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Text(s['label'] as String, style: caption),
+                                              ]),
+                                            ),
+                                          ),
+                                        );
+                                      }).toList()),
+                                      _buildProfileCompletionBanner(),
+                                      const SizedBox(height: 20),
+                                      // Tabs
+                                      Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
+                                        Expanded(child: GestureDetector(
+                                          onTap: () => setState(() => _tab = t),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(vertical: 8),
+                                            decoration: BoxDecoration(
+                                              border: Border(bottom: BorderSide(
+                                                color: _tab == t ? brandNavy : Colors.transparent, width: 1.5,
+                                              )),
+                                            ),
+                                            child: Text(
+                                              '${t[0].toUpperCase()}${t.substring(1)}${t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : ''}',
+                                              style: caption.copyWith(
+                                                color: _tab == t ? brandNavy : dim2,
+                                                fontWeight: _tab == t ? FontWeight.w600 : FontWeight.w400,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
+                                        )),
+                                      ).toList()),
+                                      const SizedBox(height: 20),
+                                    ],
                                   ),
                           ),
-                        ),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: brandNavy,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            elevation: 1,
-                          ),
-                          onPressed: _openEditProfile,
-                          icon: const Icon(Icons.edit_outlined, size: 15),
-                          label: Text('Edit Profil', style: buttonStyle.copyWith(fontSize: 12.5)),
-                        ),
-                      ]),
-                      const SizedBox(height: 14),
-                      Text(_profile?['full_name'] ?? '—', style: heading),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.school_outlined, size: 15, color: dim1),
-                              const SizedBox(width: 5),
-                              Text(
-                                '${_profile?['prodi'] ?? 'Alumni'}',
-                                style: body.copyWith(color: dim1, fontWeight: FontWeight.w500),
-                              ),
-                            ],
-                          ),
-                          if ((_profile?['angkatan'] ?? '').toString().isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: surface,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: borderColor),
-                              ),
-                              child: Text(
-                                'Angkatan ${_profile!['angkatan']}',
-                                style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600, fontSize: 11),
-                              ),
-                            ),
                         ],
                       ),
-                      if ((_profile?['pekerjaan'] ?? '').isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          '${_profile!['pekerjaan']} · ${_profile!['perusahaan'] ?? ''} · ${_profile!['kota'] ?? ''}',
-                          style: body.copyWith(color: dim2),
-                        ),
-                      ],
-                      const SizedBox(height: 18),
-                      // Stats
-                      Row(children: [
-                        {'val': '${_profile?['points'] ?? 0}', 'label': 'Poin', 'icon': Icons.stars_outlined, 'tap': false},
-                        {'val': '${_connections.length}', 'label': 'Koneksi', 'icon': Icons.people_outline, 'tap': true},
-                        {'val': '${_profile?['events_count'] ?? 0}', 'label': 'Acara', 'icon': Icons.event_available_outlined, 'tap': false},
-                      ].asMap().entries.map((e) {
-                        final i = e.key; final s = e.value;
-                        final canTap = s['tap'] == true;
-                        return Expanded(
-                          child: InkWell(
-                            onTap: canTap ? () => setState(() => _tab = 'koneksi') : null,
-                            borderRadius: BorderRadius.horizontal(
-                              left: i == 0 ? const Radius.circular(12) : Radius.zero,
-                              right: i == 2 ? const Radius.circular(12) : Radius.zero,
-                            ),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: surface,
-                                border: Border(
-                                  top: BorderSide(color: borderColor), bottom: BorderSide(color: borderColor),
-                                  left: BorderSide(color: borderColor),
-                                  right: i == 2 ? BorderSide(color: borderColor) : BorderSide.none,
-                                ),
-                                borderRadius: BorderRadius.horizontal(
-                                  left: i == 0 ? const Radius.circular(12) : Radius.zero,
-                                  right: i == 2 ? const Radius.circular(12) : Radius.zero,
-                                ),
-                              ),
-                              child: Column(children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(s['icon'] as IconData, size: 15, color: brandGold),
-                                    const SizedBox(width: 4),
-                                    Text(s['val'] as String, style: statStyle.copyWith(fontSize: 19, color: brandNavy)),
-                                  ],
-                                ),
-                                const SizedBox(height: 3),
-                                Text(s['label'] as String, style: caption),
-                              ]),
-                            ),
-                          ),
-                        );
-                      }).toList()),
-                      _buildProfileCompletionBanner(),
-                      const SizedBox(height: 20),
-                      // Tabs
-                      Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
-                        Expanded(child: GestureDetector(
-                          onTap: () => setState(() => _tab = t),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                              border: Border(bottom: BorderSide(
-                                color: _tab == t ? brandNavy : Colors.transparent, width: 1.5,
-                              )),
-                            ),
-                            child: Text(
-                              '${t[0].toUpperCase()}${t.substring(1)}${t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : ''}',
-                              style: caption.copyWith(
-                                color: _tab == t ? brandNavy : dim2,
-                                fontWeight: _tab == t ? FontWeight.w600 : FontWeight.w400,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        )),
-                      ).toList()),
-                      const SizedBox(height: 20),
-                      if (_tab == 'tentang') _buildTentang(),
-                      if (_tab == 'koneksi') _buildKoneksi(),
-                      if (_tab == 'pengaturan') _buildPengaturan(),
-                    ]),
-              ),
-            ),
-          ]),
-          ),
+                    ),
+                    if (!_loading) ..._buildTabSlivers(),
+                    const SliverToBoxAdapter(child: SizedBox(height: 24)),
+                  ],
+                ),
         ),
       ),
+      ),
     );
+  }
+
+  List<Widget> _buildTabSlivers() {
+    if (_tab == 'tentang') {
+      return [
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          sliver: SliverToBoxAdapter(child: _buildTentang()),
+        ),
+      ];
+    }
+    if (_tab == 'koneksi') {
+      return _buildKoneksiSlivers();
+    }
+    return [
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        sliver: SliverToBoxAdapter(child: _buildPengaturan()),
+      ),
+    ];
   }
 
   Widget _buildProfileCompletionBanner() {
@@ -419,6 +568,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildTentang() {
     final bio = (_profile?['bio'] ?? '').toString().trim();
     final linkedin = (_profile?['linkedin'] ?? '').toString().trim();
+    final email = (_profile?['email'] ?? '').toString().trim();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Container(
         width: double.infinity,
@@ -485,7 +635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const Icon(Icons.email_outlined, size: 17, color: dim1),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(_profile?['email'] ?? '—', style: body),
+                  child: Text(email.isNotEmpty ? email : '—', style: body),
                 ),
               ],
             ),
@@ -509,72 +659,141 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ]);
   }
 
-  Widget _buildKoneksi() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  List<Widget> _buildKoneksiSlivers() {
+    final myId = (_profile?['user_id'] ?? _profile?['id'])?.toString();
+    return [
       if (_requests.isNotEmpty) ...[
-        Text('Permintaan Masuk (${_requests.length})', style: label),
-        const SizedBox(height: 12),
-        ..._requests.map((req) {
-          final p = req['requester']?['user_profiles'];
-          if (p == null) return const SizedBox.shrink();
-          final String name = p['full_name'] ?? '—';
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
-            child: Row(children: [
-              UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
-              const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(name, style: subTitle),
-                Text('${p['prodi'] ?? ''} · Angkatan ${p['angkatan'] ?? ''}', style: caption),
-              ])),
-              IconButton(
-                icon: const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
-                onPressed: () => _respond(req['id'].toString(), 'accept'),
-              ),
-              IconButton(
-                icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
-                onPressed: () => _respond(req['id'].toString(), 'reject'),
-              ),
-            ]),
-          );
-        }),
-        const SizedBox(height: 16),
-        const Divider(color: Color(0x1A1E3A5F)),
-        const SizedBox(height: 16),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          sliver: SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text('Permintaan Masuk (${_requests.length})', style: label),
+            ),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          sliver: SliverList.builder(
+            itemCount: _requests.length,
+            itemBuilder: (context, index) {
+              final req = _requests[index];
+              final requester = req['requester'];
+              final p = _extractProfileMap(requester is Map ? requester['user_profiles'] : null);
+              if (p == null) return const SizedBox.shrink();
+              final rawName = (p['full_name'] ?? '').toString().trim();
+              final name = rawName.isEmpty ? '—' : rawName;
+              final prodi = (p['prodi'] ?? '').toString().trim();
+              final angkatan = (p['angkatan'] ?? '').toString().trim();
+              final reqId = req['id']?.toString() ?? '';
+              final busy = reqId.isEmpty || _responding.contains(reqId);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Row(children: [
+                  UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: subTitle),
+                        Text('$prodi · Angkatan $angkatan', style: caption),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                    onPressed: busy ? null : () => _respond(reqId, 'accept'),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
+                    onPressed: busy ? null : () => _respond(reqId, 'reject'),
+                  ),
+                ]),
+              );
+            },
+          ),
+        ),
+        const SliverPadding(
+          padding: EdgeInsets.fromLTRB(22, 4, 22, 16),
+          sliver: SliverToBoxAdapter(
+            child: Divider(color: Color(0x1A1E3A5F)),
+          ),
+        ),
       ],
-      Text('Jaringan Saya (${_connections.length})', style: label),
-      const SizedBox(height: 12),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        sliver: SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text('Jaringan Saya (${_connections.length})', style: label),
+          ),
+        ),
+      ),
       if (_connections.isEmpty)
-        Text('Belum ada koneksi. Jelajahi direktori untuk terhubung dengan alumni lain.', style: caption)
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          sliver: SliverToBoxAdapter(
+            child: Text(
+              'Belum ada koneksi. Jelajahi direktori untuk terhubung dengan alumni lain.',
+              style: caption,
+            ),
+          ),
+        )
       else
-        ..._connections.map((conn) {
-          // Identify the other person (not me)
-          final reqProfile = conn['requester']?['user_profiles'];
-          final addProfile = conn['addressee']?['user_profiles'];
-          final reqId = conn['requester']?['user_id'];
-          // Use the one that is NOT the current user
-          final p = reqId == _profile?['id'] ? addProfile : reqProfile;
-          if (p == null) return const SizedBox.shrink();
-          final String name = p['full_name'] ?? '—';
-          
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
-            child: Row(children: [
-              UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
-              const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(name, style: subTitle),
-                if ((p['pekerjaan'] ?? '').isNotEmpty)
-                  Text('${p['pekerjaan']} · ${p['perusahaan'] ?? ''}', style: caption, overflow: TextOverflow.ellipsis),
-              ])),
-            ]),
-          );
-        }),
-    ]);
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          sliver: SliverList.builder(
+            itemCount: _connections.length,
+            itemBuilder: (context, index) {
+              final conn = _connections[index];
+              final requester = conn['requester'];
+              final addressee = conn['addressee'];
+              final reqId = requester is Map ? (requester['user_id'] ?? requester['id'])?.toString() : null;
+              final rawProfile = reqId == myId
+                  ? (addressee is Map ? addressee['user_profiles'] : null)
+                  : (requester is Map ? requester['user_profiles'] : null);
+              final p = _extractProfileMap(rawProfile);
+              if (p == null) return const SizedBox.shrink();
+              final rawName = (p['full_name'] ?? '').toString().trim();
+              final name = rawName.isEmpty ? '—' : rawName;
+              final job = (p['pekerjaan'] ?? '').toString().trim();
+              final company = (p['perusahaan'] ?? '').toString().trim();
+              final jobLine = [job, company].where((e) => e.isNotEmpty).join(' · ');
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Row(children: [
+                  UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: subTitle),
+                        if (job.isNotEmpty)
+                          Text(jobLine, style: caption, overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                ]),
+              );
+            },
+          ),
+        ),
+    ];
   }
 
   Future<void> _openEditProfile() async {
@@ -585,13 +804,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (_) => EditProfileScreen(initialProfile: _profile!),
       ),
     );
-    if (result == true) {
+    if (result == true && mounted) {
       _avatarVersion = DateTime.now().millisecondsSinceEpoch;
       _load();
     }
   }
 
-  void _showSettingSheet({required String title, required Widget child}) {
+  void _showSettingSheet({required String title, required Widget Function(BuildContext sheetCtx) builder}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -599,10 +818,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (sheetCtx) => SafeArea(
         top: false,
         child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(ctx).viewInsets.bottom + 28),
+          padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(sheetCtx).viewInsets.bottom + 28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -617,7 +836,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 14),
               Text(title, style: heading.copyWith(fontSize: 18)),
               const SizedBox(height: 14),
-              child,
+              builder(sheetCtx),
             ],
           ),
         ),
@@ -625,145 +844,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _openChangePasswordSheet() {
-    final currentCtrl = TextEditingController();
-    final newCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-    bool busy = false;
-    String? errMsg;
-
-    showModalBottomSheet(
+  Future<void> _openChangePasswordSheet() async {
+    final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: brandBg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (sheetCtx, setSheet) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            MediaQuery.of(sheetCtx).viewInsets.bottom + 24,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('Ubah Kata Sandi', style: heading.copyWith(fontSize: 18)),
-                const SizedBox(height: 14),
-                if (errMsg != null) ...[
-                  Text(errMsg!, style: caption.copyWith(color: Colors.red)),
-                  const SizedBox(height: 10),
-                ],
-                TextField(
-                  controller: currentCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Kata Sandi Saat Ini'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: newCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Kata Sandi Baru (min 8 karakter)'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: confirmCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Konfirmasi Kata Sandi Baru'),
-                ),
-                const SizedBox(height: 18),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: brandNavy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    elevation: 0,
-                  ),
-                  onPressed: busy
-                      ? null
-                      : () async {
-                          if (newCtrl.text.length < 8) {
-                            setSheet(() => errMsg = 'Password baru minimal 8 karakter');
-                            return;
-                          }
-                          if (newCtrl.text != confirmCtrl.text) {
-                            setSheet(() => errMsg = 'Konfirmasi password tidak cocok');
-                            return;
-                          }
-                          setSheet(() {
-                            busy = true;
-                            errMsg = null;
-                          });
-                          try {
-                            await AuthService.changePassword(
-                              currentPassword: currentCtrl.text,
-                              newPassword: newCtrl.text,
-                            );
-                            if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Kata sandi berhasil diubah')),
-                              );
-                            }
-                          } catch (e) {
-                            setSheet(() {
-                              busy = false;
-                              errMsg = e.toString().replaceFirst('Exception: ', '');
-                            });
-                          }
-                        },
-                  child: busy
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                        )
-                      : Text('Simpan Kata Sandi', style: buttonStyle),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      builder: (_) => const _ChangePasswordSheet(),
     );
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kata sandi berhasil diubah')),
+      );
+    }
   }
 
   void _openPrivacySheet() {
     _showSettingSheet(
       title: 'Privasi & Keamanan',
-      child: StatefulBuilder(
+      builder: (_) => StatefulBuilder(
         builder: (ctx, setSheet) => Column(
           children: [
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              activeColor: brandNavy,
+              activeThumbColor: brandNavy,
               title: Text('Tampilkan Email di Direktori', style: subTitle),
               subtitle: Text('Izinkan alumni lain melihat alamat emailmu', style: caption),
               value: _privacyShowEmail,
               onChanged: (v) async {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('pref_privacy_email', v);
-                setState(() => _privacyShowEmail = v);
-                setSheet(() {});
+                if (mounted) setState(() => _privacyShowEmail = v);
+                if (ctx.mounted) setSheet(() {});
               },
             ),
             const Divider(height: 1, color: Color(0x1A1E3A5F)),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              activeColor: brandNavy,
+              activeThumbColor: brandNavy,
               title: Text('Terima Permintaan Koneksi', style: subTitle),
               subtitle: Text('Alumni lain dapat mengirim permintaan koneksi', style: caption),
               value: _privacyAllowConnect,
               onChanged: (v) async {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('pref_privacy_connect', v);
-                setState(() => _privacyAllowConnect = v);
-                setSheet(() {});
+                if (mounted) setState(() => _privacyAllowConnect = v);
+                if (ctx.mounted) setSheet(() {});
               },
             ),
           ],
@@ -775,48 +903,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _openNotificationsSheet() {
     _showSettingSheet(
       title: 'Pengaturan Notifikasi',
-      child: StatefulBuilder(
+      builder: (_) => StatefulBuilder(
         builder: (ctx, setSheet) => Column(
           children: [
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              activeColor: brandNavy,
+              activeThumbColor: brandNavy,
               title: Text('Postingan & Komentar', style: subTitle),
               subtitle: Text('Notifikasi saat ada komentar atau like baru', style: caption),
               value: _notifPosts,
               onChanged: (v) async {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('pref_notif_posts', v);
-                setState(() => _notifPosts = v);
-                setSheet(() {});
+                if (mounted) setState(() => _notifPosts = v);
+                if (ctx.mounted) setSheet(() {});
               },
             ),
             const Divider(height: 1, color: Color(0x1A1E3A5F)),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              activeColor: brandNavy,
+              activeThumbColor: brandNavy,
               title: Text('Permintaan Koneksi', style: subTitle),
               subtitle: Text('Notifikasi saat alumni mengajak terhubung', style: caption),
               value: _notifConnections,
               onChanged: (v) async {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('pref_notif_connections', v);
-                setState(() => _notifConnections = v);
-                setSheet(() {});
+                if (mounted) setState(() => _notifConnections = v);
+                if (ctx.mounted) setSheet(() {});
               },
             ),
             const Divider(height: 1, color: Color(0x1A1E3A5F)),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              activeColor: brandNavy,
+              activeThumbColor: brandNavy,
               title: Text('Acara Alumni', style: subTitle),
               subtitle: Text('Pengingat acara kampus & reuni terdekat', style: caption),
               value: _notifEvents,
               onChanged: (v) async {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('pref_notif_events', v);
-                setState(() => _notifEvents = v);
-                setSheet(() {});
+                if (mounted) setState(() => _notifEvents = v);
+                if (ctx.mounted) setSheet(() {});
               },
             ),
           ],
@@ -829,7 +957,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     const options = ['Bahasa Indonesia', 'English'];
     _showSettingSheet(
       title: 'Pilih Bahasa',
-      child: Column(
+      builder: (sheetCtx) => Column(
         children: options.map((lang) {
           final selected = _language == lang;
           return ListTile(
@@ -842,9 +970,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onTap: () async {
               final prefs = await SharedPreferences.getInstance();
               await prefs.setString('pref_language', lang);
-              setState(() => _language = lang);
+              if (mounted) setState(() => _language = lang);
+              if (sheetCtx.mounted) Navigator.pop(sheetCtx);
               if (mounted) {
-                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Bahasa diatur ke $lang')),
                 );
@@ -859,7 +987,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _openHelpSheet() {
     _showSettingSheet(
       title: 'Bantuan & Dukungan',
-      child: Column(
+      builder: (_) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _helpItem('Cara mengganti foto & data profil', 'Buka Edit Profil, pilih foto baru atau ubah prodi/angkatan, lalu tekan Simpan.'),
@@ -895,7 +1023,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _openAboutSheet() {
     _showSettingSheet(
       title: 'Tentang Aplikasi',
-      child: Container(
+      builder: (_) => Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -1016,6 +1144,120 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ]),
       )).toList(),
+    );
+  }
+}
+
+class _ChangePasswordSheet extends StatefulWidget {
+  const _ChangePasswordSheet();
+
+  @override
+  State<_ChangePasswordSheet> createState() => _ChangePasswordSheetState();
+}
+
+class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
+  final _currentCtrl = TextEditingController();
+  final _newCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  bool _busy = false;
+  String? _errMsg;
+
+  @override
+  void dispose() {
+    _currentCtrl.dispose();
+    _newCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    if (_newCtrl.text.length < 8) {
+      setState(() => _errMsg = 'Password baru minimal 8 karakter');
+      return;
+    }
+    if (_newCtrl.text != _confirmCtrl.text) {
+      setState(() => _errMsg = 'Konfirmasi password tidak cocok');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _errMsg = null;
+    });
+    try {
+      await AuthService.changePassword(
+        currentPassword: _currentCtrl.text,
+        newPassword: _newCtrl.text,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _errMsg = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Ubah Kata Sandi', style: heading.copyWith(fontSize: 18)),
+            const SizedBox(height: 14),
+            if (_errMsg != null) ...[
+              Text(_errMsg!, style: caption.copyWith(color: Colors.red)),
+              const SizedBox(height: 10),
+            ],
+            TextField(
+              controller: _currentCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Kata Sandi Saat Ini'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _newCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Kata Sandi Baru (min 8 karakter)'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _confirmCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Konfirmasi Kata Sandi Baru'),
+            ),
+            const SizedBox(height: 18),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: brandNavy,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                elevation: 0,
+              ),
+              onPressed: _busy ? null : _submit,
+              child: _busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text('Simpan Kata Sandi', style: buttonStyle),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

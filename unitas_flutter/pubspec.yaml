@@ -1,4 +1,4 @@
-﻿name: unitas_flutter
+name: unitas_flutter
 description: "Unitas â€” Platform Alumni Digital"
 publish_to: 'none'
 
@@ -31,9 +31,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
   http: ^1.2.1
+  http_parser: ^4.1.2
   shared_preferences: ^2.3.2
   image_picker: ^1.2.3
   flutter_dotenv: ^6.0.1
+  flutter_secure_storage: ^11.2.0
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:

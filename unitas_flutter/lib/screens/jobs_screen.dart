@@ -39,9 +39,11 @@ class _JobsScreenState extends State<JobsScreen> {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
     _load();
+    _loadSavedIds();
   }
 
   void _onScroll() {
+    if (!_scrollCtrl.hasClients) return;
     if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
       _loadMore();
     }
@@ -49,14 +51,34 @@ class _JobsScreenState extends State<JobsScreen> {
 
   @override
   void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  /// Muat id lowongan yang sudah disimpan supaya ikon bookmark akurat di semua filter.
+  Future<void> _loadSavedIds() async {
+    try {
+      final saved = await JobsService.getSavedJobs();
+      if (!mounted) return;
+      setState(() => _savedIds.addAll(
+            saved.map((j) => j['id']?.toString() ?? '').where((id) => id.isNotEmpty),
+          ));
+    } catch (_) {}
+  }
+
+  int _loadEpoch = 0; // abaikan respons lama saat filter berganti cepat
+  bool _error = false;
+  int _autoFillPages = 0;
+
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
+    _autoFillPages = 0;
     setState(() {
       _loading = true;
+      _error = false;
+      _loadingMore = false;
       _page = 1;
       _hasMore = true;
     });
@@ -64,7 +86,7 @@ class _JobsScreenState extends State<JobsScreen> {
       final isRemote = _filter == 'Remote' ? true : null;
       if (_filter == 'Tersimpan') {
         final saved = await JobsService.getSavedJobs();
-        if (mounted) {
+        if (mounted && epoch == _loadEpoch) {
           setState(() {
             _jobs = saved;
             _hasMore = false;
@@ -74,43 +96,71 @@ class _JobsScreenState extends State<JobsScreen> {
         }
       } else {
         final jobs = await JobsService.getJobs(isRemote: isRemote, page: 1);
-        if (mounted) {
+        if (mounted && epoch == _loadEpoch) {
           setState(() {
             _hasMore = jobs.length >= 20;
             if (_filter != 'Semua' && _filter != 'Remote') {
-              _jobs = jobs.where((j) => j['job_type'] == _filter).toList();
+              _jobs = jobs
+                  .where((j) =>
+                      j['job_type'] == _filter ||
+                      (_filter == 'Magang' && j['job_type'] == 'Internship'))
+                  .toList();
             } else {
               _jobs = jobs;
             }
             _loading = false;
           });
+          _maybeAutoFill();
         }
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && epoch == _loadEpoch) {
+        setState(() {
+          _loading = false;
+          _error = true;
+        });
+      }
     }
+  }
+
+  /// Filter tipe dilakukan di klien: jika hasil terlalu sedikit untuk di-scroll,
+  /// ambil halaman berikutnya (dibatasi) agar filter tidak tampak kosong.
+  void _maybeAutoFill() {
+    if (!_hasMore || _autoFillPages >= 4) return;
+    if (_filter == 'Semua' || _filter == 'Remote' || _filter == 'Tersimpan') return;
+    if (_jobs.length >= 6) return;
+    _autoFillPages++;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadMore();
+    });
   }
 
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore || _loading || _filter == 'Tersimpan') return;
+    final epoch = _loadEpoch;
     setState(() => _loadingMore = true);
     try {
       final nextPage = _page + 1;
       final isRemote = _filter == 'Remote' ? true : null;
       final more = await JobsService.getJobs(isRemote: isRemote, page: nextPage);
-      if (mounted) {
+      if (mounted && epoch == _loadEpoch) {
         setState(() {
           final filtered = (_filter != 'Semua' && _filter != 'Remote')
-              ? more.where((j) => j['job_type'] == _filter).toList()
+              ? more
+                  .where((j) =>
+                      j['job_type'] == _filter ||
+                      (_filter == 'Magang' && j['job_type'] == 'Internship'))
+                  .toList()
               : more;
           _jobs = [..._jobs, ...filtered];
           _page = nextPage;
           _hasMore = more.length >= 20;
           _loadingMore = false;
         });
+        _maybeAutoFill();
       }
     } catch (_) {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && epoch == _loadEpoch) setState(() => _loadingMore = false);
     }
   }
 
@@ -119,12 +169,15 @@ class _JobsScreenState extends State<JobsScreen> {
       context,
       MaterialPageRoute(builder: (_) => const CreateJobScreen()),
     );
-    if (result == true) {
+    if (result == true && mounted) {
       _load();
     }
   }
 
+  final Set<String> _savingIds = {};
+
   Future<void> _toggleSave(String id) async {
+    if (!_savingIds.add(id)) return; // cegah double-tap
     final wasSaved = _savedIds.contains(id);
     setState(() {
       wasSaved ? _savedIds.remove(id) : _savedIds.add(id);
@@ -137,6 +190,8 @@ class _JobsScreenState extends State<JobsScreen> {
           wasSaved ? _savedIds.add(id) : _savedIds.remove(id);
         });
       }
+    } finally {
+      _savingIds.remove(id);
     }
   }
 
@@ -162,13 +217,21 @@ class _JobsScreenState extends State<JobsScreen> {
   Color _colorFor(int i) => _logoColors[i % _logoColors.length];
 
   String _logoText(Map<String, dynamic> job) {
-    final co = (job['company'] ?? '').toString();
+    final co = (job['company'] ?? '').toString().trim();
+    if (co.isEmpty) return '?';
     return co.length >= 2 ? co.substring(0, 2).toUpperCase() : co.toUpperCase();
   }
 
+  String _str(Map<String, dynamic> job, String key, [String fallback = '']) {
+    final v = job[key];
+    if (v == null) return fallback;
+    final s = v.toString();
+    return s.isEmpty ? fallback : s;
+  }
+
   String _salary(Map<String, dynamic> job) {
-    final min = job['salary_min'];
-    final max = job['salary_max'];
+    final min = num.tryParse('${job['salary_min'] ?? ''}');
+    final max = num.tryParse('${job['salary_max'] ?? ''}');
     if (min == null && max == null) return 'Dirahasiakan';
     if (min != null && max != null) {
       return 'Rp ${(min / 1000000).toStringAsFixed(1)}–${(max / 1000000).toStringAsFixed(1)} jt';
@@ -182,6 +245,7 @@ class _JobsScreenState extends State<JobsScreen> {
     final dt = DateTime.tryParse(isoDate)?.toLocal();
     if (dt == null) return '';
     final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'Baru saja';
     if (diff.inMinutes < 60) return '${diff.inMinutes} menit lalu';
     if (diff.inHours < 24) return '${diff.inHours} jam lalu';
     return '${diff.inDays} hari lalu';
@@ -216,11 +280,12 @@ class _JobsScreenState extends State<JobsScreen> {
             child: RefreshIndicator(
               onRefresh: _load,
               color: brandNavy,
-              child: SingleChildScrollView(
+              child: CustomScrollView(
                 controller: _scrollCtrl,
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 100),
-                child: Column(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Header
@@ -251,8 +316,8 @@ class _JobsScreenState extends State<JobsScreen> {
                                     context,
                                     MaterialPageRoute(builder: (_) => const ManageJobScreen()),
                                   );
-                                  _load();
-                                },
+                                   if (mounted) _load();
+                                 },
                                 borderRadius: BorderRadius.circular(10),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -376,12 +441,18 @@ class _JobsScreenState extends State<JobsScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
+                  ],
+                ),
+                  ),
 
-                    // Content
-                    if (_loading)
-                      const JobSkeletonList()
-                    else if (list.isEmpty)
-                      Container(
+                  // Content
+                  if (_loading || _error || list.isEmpty)
+                    SliverToBoxAdapter(
+                      child: _loading
+                      ? const JobSkeletonList()
+                      : _error
+                      ? _errorBox()
+                      : Container(
                         width: double.infinity,
                         margin: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -459,18 +530,19 @@ class _JobsScreenState extends State<JobsScreen> {
                             ),
                           ],
                         ),
-                      )
-                    else
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 22),
-                        child: Column(
-                          children: list.asMap().entries.map((e) {
-                            final i = e.key;
-                            final job = e.value;
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 22),
+                      sliver: SliverList.builder(
+                        itemCount: list.length,
+                        itemBuilder: (context, i) {
+                            final job = list[i];
                             final id = job['id']?.toString() ?? '$i';
                             final isSaved = _savedIds.contains(id);
                             final tags = _tags(job);
-                            final jobType = job['job_type'] ?? 'Full-time';
+                            final jobType = _str(job, 'job_type', 'Full-time');
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
@@ -516,7 +588,9 @@ class _JobsScreenState extends State<JobsScreen> {
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                job['title'] ?? '—',
+                                                _str(job, 'title', '—'),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
                                                 style: subTitle.copyWith(
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.bold,
@@ -525,7 +599,7 @@ class _JobsScreenState extends State<JobsScreen> {
                                               ),
                                               const SizedBox(height: 4),
                                               Text(
-                                                job['company'] ?? '',
+                                                _str(job, 'company'),
                                                 style: body.copyWith(fontWeight: FontWeight.w500, color: dim1),
                                               ),
                                             ],
@@ -550,7 +624,7 @@ class _JobsScreenState extends State<JobsScreen> {
                                       spacing: 8,
                                       runSpacing: 8,
                                       children: [
-                                        _infoChip(Icons.location_on_outlined, job['location'] ?? 'Lokasi tidak disebutkan'),
+                                        _infoChip(Icons.location_on_outlined, _str(job, 'location', 'Lokasi tidak disebutkan')),
                                         _infoChip(Icons.work_outline, jobType),
                                         _infoChip(Icons.attach_money, _salary(job)),
                                       ],
@@ -585,7 +659,7 @@ class _JobsScreenState extends State<JobsScreen> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            _timeAgo(job['created_at']),
+                                            _timeAgo(job['created_at']?.toString()),
                                             style: caption.copyWith(color: dim2),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -610,20 +684,47 @@ class _JobsScreenState extends State<JobsScreen> {
                                 ),
                               ),
                             );
-                          }).toList(),
-                        ),
+                        },
                       ),
-                    if (_loadingMore)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                      ),
-                  ],
-                ),
+                    ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 100),
+                      child: _loadingMore
+                          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _errorBox() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.wifi_off_rounded, color: dim2, size: 36),
+          const SizedBox(height: 12),
+          Text('Gagal memuat lowongan', style: subTitle.copyWith(fontSize: 16)),
+          const SizedBox(height: 6),
+          Text('Periksa koneksi internetmu lalu coba lagi.', style: caption.copyWith(color: dim1)),
+          const SizedBox(height: 16),
+          OutlinedButton(onPressed: _load, child: const Text('Coba lagi')),
+        ],
       ),
     );
   }

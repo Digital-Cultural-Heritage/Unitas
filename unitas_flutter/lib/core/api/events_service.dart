@@ -1,3 +1,4 @@
+import '../utils/json_utils.dart';
 import 'api_client.dart';
 
 class EventsService {
@@ -8,8 +9,7 @@ class EventsService {
       params.write('&category=${Uri.encodeComponent(category)}');
     }
     final res = await ApiClient.get(params.toString(), auth: false);
-    final list = res['data'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    return asJsonMapList(res);
   }
 
   // ── Register to event ──────────────────────────────────────────────────
@@ -25,15 +25,13 @@ class EventsService {
   // ── Get My Events ──────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getMyEvents() async {
     final res = await ApiClient.get('/api/events/my-events/all');
-    final list = res['data'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    return asJsonMapList(res);
   }
 
   // ── Get Attendees ──────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getAttendees(String eventId) async {
     final res = await ApiClient.get('/api/events/$eventId/attendees');
-    final list = res['data'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    return asJsonMapList(res);
   }
 
   // ── Update Event ───────────────────────────────────────────────────────

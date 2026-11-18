@@ -1,4 +1,5 @@
-﻿import 'api_client.dart';
+﻿import '../utils/json_utils.dart';
+import 'api_client.dart';
 
 class UsersService {
   // ── Directory ──────────────────────────────────────────────────────────
@@ -14,22 +15,21 @@ class UsersService {
     if (isOnline == true) params.write('&is_online=true');
 
     final res = await ApiClient.get(params.toString(), auth: true);
-    final list = res['data'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    return asJsonMapList(res);
   }
 
   // ── Get single user profile ────────────────────────────────────────────
   static Future<Map<String, dynamic>> getUserById(String userId) async {
     final res = await ApiClient.get('/api/users/$userId', auth: true);
-    return Map<String, dynamic>.from(res);
+    return asJsonMap(res);
   }
 
   // ── My profile ─────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getMe() async {
-    final res = Map<String, dynamic>.from(await ApiClient.get('/api/users/me'));
+    final res = asJsonMap(await ApiClient.get('/api/users/me'));
     if (res['full_name'] == null && res['id'] != null) {
       try {
-        final profile = Map<String, dynamic>.from(
+        final profile = asJsonMap(
           await ApiClient.get('/api/users/${res['id']}', auth: false),
         );
         return {...profile, ...res};
@@ -41,33 +41,37 @@ class UsersService {
   // ── Update profile ─────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> updateMe(Map<String, dynamic> updates) async {
     final res = await ApiClient.put('/api/users/me', body: updates);
-    return Map<String, dynamic>.from(res);
+    return asJsonMap(res);
   }
 
   // ── Upload avatar ──────────────────────────────────────────────────────
   static Future<String> uploadAvatar(List<int> bytes, String filename) async {
-    final res = await ApiClient.uploadFile('/api/upload/avatar', bytes: bytes, filename: filename);
-    return res['url'] as String;
+    final res = asJsonMap(
+      await ApiClient.uploadFile('/api/upload/avatar', bytes: bytes, filename: filename),
+    );
+    final url = res['url']?.toString();
+    if (url == null || url.isEmpty) {
+      throw const ApiException('URL avatar tidak ditemukan', 500);
+    }
+    return url;
   }
 
   // ── Connect ────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> connect(String userId) async {
     final res = await ApiClient.post('/api/users/$userId/connect');
-    return Map<String, dynamic>.from(res);
+    return asJsonMap(res);
   }
 
   // ── My connections ─────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getMyConnections() async {
     final res = await ApiClient.get('/api/users/me/connections');
-    final list = res['data'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    return asJsonMapList(res);
   }
 
   // ── Incoming Requests ──────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getIncomingRequests() async {
     final res = await ApiClient.get('/api/users/me/requests');
-    final list = res['data'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    return asJsonMapList(res);
   }
 
   static Future<void> respondRequest(String requestId, String action) async {

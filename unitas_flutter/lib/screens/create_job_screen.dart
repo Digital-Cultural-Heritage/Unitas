@@ -58,12 +58,11 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     } else {
       list.add(tag);
     }
-    setState(() {
-      _tagsCtrl.text = list.join(', ');
-    });
+    _tagsCtrl.text = list.join(', ');
   }
 
   Future<void> _submit() async {
+    if (_loading) return;
     if (!_formKey.currentState!.validate()) return;
 
     final sMin = int.tryParse(_salaryMinCtrl.text.replaceAll(RegExp(r'[^0-9]'), ''));
@@ -117,8 +116,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final activeTags = _currentTags().map((e) => e.toLowerCase()).toSet();
-
     return Scaffold(
       backgroundColor: brandBg,
       appBar: AppBar(
@@ -252,7 +249,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                     _tagsCtrl,
                     Icons.label_outline,
                     'Contoh: Node.js, Remote, Startup',
-                    onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 14),
                   _field(
@@ -269,42 +265,48 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                     'Contoh: hr@perusahaan.com',
                   ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: _suggestedTags.map((tag) {
-                      final isAdded = activeTags.contains(tag.toLowerCase());
-                      return InkWell(
-                        onTap: () => _toggleSuggestedTag(tag),
-                        borderRadius: BorderRadius.circular(16),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: isAdded ? brandNavy : card,
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _tagsCtrl,
+                    builder: (_, _, _) {
+                      final activeTags = _currentTags().map((e) => e.toLowerCase()).toSet();
+                      return Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _suggestedTags.map((tag) {
+                          final isAdded = activeTags.contains(tag.toLowerCase());
+                          return InkWell(
+                            onTap: () => _toggleSuggestedTag(tag),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: isAdded ? brandNavy : borderColor),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isAdded ? Icons.check : Icons.add,
-                                size: 13,
-                                color: isAdded ? Colors.white : dim1,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: isAdded ? brandNavy : card,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: isAdded ? brandNavy : borderColor),
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                tag,
-                                style: caption.copyWith(
-                                  color: isAdded ? Colors.white : dim1,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    isAdded ? Icons.check : Icons.add,
+                                    size: 13,
+                                    color: isAdded ? Colors.white : dim1,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    tag,
+                                    style: caption.copyWith(
+                                      color: isAdded ? Colors.white : dim1,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
+                            ),
+                          );
+                        }).toList(),
                       );
-                    }).toList(),
+                    },
                   ),
                   const SizedBox(height: 24),
 

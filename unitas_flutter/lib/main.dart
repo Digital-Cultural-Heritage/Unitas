@@ -1,22 +1,23 @@
+import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'core/theme/colors.dart';
+import 'core/api/api_client.dart';
 import 'core/api/auth_service.dart';
-import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
+import 'core/theme/colors.dart';
 import 'screens/directory_screen.dart';
 import 'screens/events_screen.dart';
+import 'screens/home_screen.dart';
 import 'screens/jobs_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
-  // Synchronous — jangan panggil plugin apapun di sini
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await dotenv.load(fileName: ".env");
+    await dotenv.load(fileName: '.env');
   } catch (_) {}
   try {
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -35,28 +36,77 @@ class UnitasApp extends StatefulWidget {
 }
 
 class _UnitasAppState extends State<UnitasApp> {
-  // null = masih loading, true = sudah login, false = belum login
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+  StreamSubscription<void>? _sessionSub;
+
+  // null = masih memeriksa sesi, true = sudah login, false = belum login
   bool? _loggedIn;
+  int _sessionEpoch = 0;
 
   @override
   void initState() {
     super.initState();
-    // Panggil SETELAH widget mounted — plugin sudah terdaftar
+    _sessionSub = ApiClient.onSessionExpired.listen((_) => _onSessionExpired());
     _checkAuth();
   }
 
+  @override
+  void dispose() {
+    _sessionSub?.cancel();
+    super.dispose();
+  }
+
   Future<void> _checkAuth() async {
-    final loggedIn = await AuthService.isLoggedIn();
+    final loggedIn = await AuthService.restoreSession();
     if (mounted) setState(() => _loggedIn = loggedIn);
   }
 
-  void _onLoginSuccess() => setState(() => _loggedIn = true);
-  void _onLogout() => setState(() => _loggedIn = false);
+  void _onLoginSuccess() {
+    if (!mounted) return;
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() {
+      _sessionEpoch++;
+      _loggedIn = true;
+    });
+  }
+
+  void _onLogout() {
+    if (!mounted) return;
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() {
+      _sessionEpoch++;
+      _loggedIn = false;
+    });
+  }
+
+  void _onSessionExpired() {
+    if (!mounted) return;
+    final wasLoggedIn = _loggedIn == true;
+    unawaited(AuthService.signOutGoogleQuietly());
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() {
+      _sessionEpoch++;
+      _loggedIn = false;
+    });
+    if (wasLoggedIn) {
+      _messengerKey.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Sesi kamu telah berakhir. Silakan masuk kembali.'),
+          ),
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Unitas',
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
       scrollBehavior: const _UnitasScrollBehavior(),
       theme: ThemeData(
@@ -74,8 +124,11 @@ class _UnitasAppState extends State<UnitasApp> {
         useMaterial3: true,
       ),
       home: switch (_loggedIn) {
-        null  => const _SplashScreen(),
-        true  => MainShell(onLogout: _onLogout),
+        null => const _SplashScreen(),
+        true => MainShell(
+            key: ValueKey(_sessionEpoch),
+            onLogout: _onLogout,
+          ),
         false => LoginScreen(onLoginSuccess: _onLoginSuccess),
       },
     );
@@ -165,11 +218,11 @@ class _MainShellState extends State<MainShell> {
   late final Widget _profileScreen = ProfileScreen(onLogout: widget.onLogout);
 
   final List<_NavItem> _navItems = const [
-    _NavItem(icon: Icons.home_outlined,           activeIcon: Icons.home,           label: 'Beranda'),
-    _NavItem(icon: Icons.people_outline,          activeIcon: Icons.people,         label: 'Alumni'),
+    _NavItem(icon: Icons.home_outlined, activeIcon: Icons.home, label: 'Beranda'),
+    _NavItem(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Alumni'),
     _NavItem(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today, label: 'Acara'),
-    _NavItem(icon: Icons.work_outline,            activeIcon: Icons.work,           label: 'Karier'),
-    _NavItem(icon: Icons.person_outline,          activeIcon: Icons.person,         label: 'Profil'),
+    _NavItem(icon: Icons.work_outline, activeIcon: Icons.work, label: 'Karier'),
+    _NavItem(icon: Icons.person_outline, activeIcon: Icons.person, label: 'Profil'),
   ];
 
   @override
@@ -226,7 +279,8 @@ class _MainShellState extends State<MainShell> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: _navItems.asMap().entries.map((e) {
-                final i = e.key; final item = e.value;
+                final i = e.key;
+                final item = e.value;
                 final isActive = i == _currentIndex;
                 return GestureDetector(
                   onTap: () => setState(() {
@@ -241,22 +295,25 @@ class _MainShellState extends State<MainShell> {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(
-                        isActive ? item.activeIcon : item.icon,
-                        color: isActive ? navIconActive : navIconInactive,
-                        size: 22,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item.label,
-                        style: GoogleFonts.outfit(
-                          fontSize: 10,
-                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isActive ? item.activeIcon : item.icon,
                           color: isActive ? navIconActive : navIconInactive,
+                          size: 22,
                         ),
-                      ),
-                    ]),
+                        const SizedBox(height: 4),
+                        Text(
+                          item.label,
+                          style: GoogleFonts.outfit(
+                            fontSize: 10,
+                            fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                            color: isActive ? navIconActive : navIconInactive,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               }).toList(),
@@ -272,7 +329,11 @@ class _NavItem {
   final IconData icon;
   final IconData activeIcon;
   final String label;
-  const _NavItem({required this.icon, required this.activeIcon, required this.label});
+  const _NavItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+  });
 }
 
 class _UnitasScrollBehavior extends MaterialScrollBehavior {

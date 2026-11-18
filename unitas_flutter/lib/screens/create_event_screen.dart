@@ -22,13 +22,14 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   final _locCtrl = TextEditingController();
 
   String _category = 'Seminar';
-  final List<String> _cats = ['Reuni', 'Seminar', 'Networking', 'Webinar'];
+  static const List<String> _cats = ['Reuni', 'Seminar', 'Networking', 'Webinar'];
 
   DateTime? _date;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   bool _isOnline = false;
   bool _loading = false;
+  bool _picking = false;
   XFile? _bannerFile;
   Uint8List? _bannerBytes;
 
@@ -41,40 +42,62 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   Future<void> _pickBanner() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
+    if (_picking || _loading) return;
+    _picking = true;
     try {
-      ImageValidator.validate(bytes, picked.name);
-    } on ImageValidationException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+        maxWidth: 2048,
+        maxHeight: 2048,
+      );
+      if (picked == null || !mounted) return;
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      try {
+        ImageValidator.validate(bytes, picked.name);
+      } on ImageValidationException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        }
+        return;
       }
-      return;
-    }
-    if (!mounted) return;
-    final cropped = await showImageCropDialog(
-      context,
-      bytes,
-      aspectRatio: 16 / 9,
-      isCircle: false,
-      title: 'Sesuaikan Banner Acara',
-    );
-    if (cropped != null && mounted) {
-      setState(() {
-        _bannerFile = picked;
-        _bannerBytes = cropped;
-      });
+      if (!mounted) return;
+      final cropped = await showImageCropDialog(
+        context,
+        bytes,
+        aspectRatio: 16 / 9,
+        isCircle: false,
+        title: 'Sesuaikan Banner Acara',
+      );
+      if (cropped != null && mounted) {
+        setState(() {
+          _bannerFile = picked;
+          _bannerBytes = cropped;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memilih gambar banner')),
+        );
+      }
+    } finally {
+      _picking = false;
     }
   }
 
   Future<void> _pickDate() async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final initial = _date != null && !_date!.isBefore(today)
+        ? _date!
+        : today.add(const Duration(days: 1));
     final dt = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDate: initial,
+      firstDate: today,
+      lastDate: today.add(const Duration(days: 365)),
       builder: (context, child) {
         return Theme(
           data: ThemeData.light().copyWith(
@@ -84,15 +107,15 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         );
       },
     );
-    if (dt != null) setState(() => _date = dt);
+    if (dt != null && mounted) setState(() => _date = dt);
   }
 
   Future<void> _pickTime(bool isStart) async {
     final t = await showTimePicker(
       context: context,
       initialTime: isStart
-          ? const TimeOfDay(hour: 9, minute: 0)
-          : const TimeOfDay(hour: 12, minute: 0),
+          ? (_startTime ?? const TimeOfDay(hour: 9, minute: 0))
+          : (_endTime ?? const TimeOfDay(hour: 12, minute: 0)),
       builder: (context, child) {
         return Theme(
           data: ThemeData.light().copyWith(
@@ -102,7 +125,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         );
       },
     );
-    if (t != null) {
+    if (t != null && mounted) {
       setState(() {
         if (isStart) {
           _startTime = t;
@@ -130,7 +153,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_loading) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_date == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tanggal acara wajib diisi')),
@@ -165,6 +189,10 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           const SnackBar(content: Text('Acara berhasil dibuat!')),
         );
         Navigator.pop(context, true);
+      }
+    } on ImageValidationException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -239,7 +267,12 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(14),
-                                  child: Image.memory(_bannerBytes!, fit: BoxFit.cover),
+                                  child: Image.memory(
+                                    _bannerBytes!,
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 1200,
+                                    gaplessPlayback: true,
+                                  ),
                                 ),
                                 Positioned(
                                   right: 10,

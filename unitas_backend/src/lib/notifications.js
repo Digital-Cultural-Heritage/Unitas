@@ -14,14 +14,20 @@ async function createNotification({
 }) {
   if (!userId || (actorId && userId === actorId)) return;
   try {
-    await supabase.from("notifications").insert({
+    const safeTitle = typeof title === "string" ? title.slice(0, 200) : String(title || "").slice(0, 200);
+    const safeBody = typeof body === "string" && body.trim() ? body.trim().slice(0, 500) : null;
+
+    const { error } = await supabase.from("notifications").insert({
       user_id: userId,
       actor_id: actorId,
       type,
-      title,
-      body,
+      title: safeTitle,
+      body: safeBody,
       reference_id: referenceId ? String(referenceId) : null,
     });
+    if (error) {
+      console.error("Failed to create notification:", error.message);
+    }
   } catch (err) {
     console.error("Failed to create notification:", err.message);
   }

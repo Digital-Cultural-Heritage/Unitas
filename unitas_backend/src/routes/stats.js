@@ -8,23 +8,21 @@ router.get("/", async (req, res, next) => {
   try {
     const today = new Date().toISOString().split("T")[0];
 
-    const [
-      { count: totalAlumni },
-      { count: totalEvents },
-      { count: activeEvents },
-      { count: totalJobs },
-    ] = await Promise.all([
-      supabase.from("users").select("*", { count: "exact", head: true }),
-      supabase.from("events").select("*", { count: "exact", head: true }),
-      supabase.from("events").select("*", { count: "exact", head: true }).gte("event_date", today),
-      supabase.from("jobs").select("*", { count: "exact", head: true }).eq("is_active", true),
+    const [alumniRes, eventsRes, activeEventsRes, jobsRes] = await Promise.all([
+      supabase.from("users").select("id", { count: "exact", head: true }),
+      supabase.from("events").select("id", { count: "exact", head: true }),
+      supabase.from("events").select("id", { count: "exact", head: true }).gte("event_date", today),
+      supabase.from("jobs").select("id", { count: "exact", head: true }).eq("is_active", true),
     ]);
 
+    const firstErr = alumniRes.error || eventsRes.error || activeEventsRes.error || jobsRes.error;
+    if (firstErr) throw firstErr;
+
     res.json({
-      total_alumni: totalAlumni || 0,
-      total_events: totalEvents || 0,
-      active_events: activeEvents || 0,
-      total_jobs: totalJobs || 0,
+      total_alumni: alumniRes.count || 0,
+      total_events: eventsRes.count || 0,
+      active_events: activeEventsRes.count || 0,
+      total_jobs: jobsRes.count || 0,
     });
   } catch (err) {
     next(err);

@@ -24,26 +24,47 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
   bool _loading = true;
   bool _connecting = false;
   String _connStatus = 'none';
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     _profile = widget.initialProfile;
+    _connStatus = (widget.initialProfile?['connection_status'] ?? 'none').toString();
     _load();
   }
 
   Future<void> _load() async {
+    if (mounted && (_error != null || !_loading && _profile == null)) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final data = await UsersService.getUserById(widget.userId);
       if (mounted) {
         setState(() {
           _profile = data;
           _connStatus = (data['connection_status'] ?? 'none').toString();
+          _error = null;
           _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          if (_profile == null) {
+            _error = 'Gagal memuat profil alumni';
+          }
+        });
+        if (_profile != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Gagal memperbarui profil alumni')),
+          );
+        }
+      }
     }
   }
 
@@ -52,7 +73,8 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
     setState(() => _connecting = true);
     try {
       final res = await UsersService.connect(widget.userId);
-      final serverStatus = res['connection']?['status']?.toString();
+      final conn = res['connection'];
+      final serverStatus = conn is Map ? conn['status']?.toString() : null;
       final msg = (res['message'] ?? '').toString();
       final nextStatus = (serverStatus == 'accepted' ||
               msg == 'Sudah terhubung' ||
@@ -81,7 +103,8 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
   String _initials(Map<String, dynamic>? p) {
     final ini = (p?['initials'] ?? '').toString().trim();
     if (ini.isNotEmpty) return ini;
-    final name = (p?['full_name'] ?? 'AL').toString().trim();
+    final name = (p?['full_name'] ?? '').toString().trim();
+    if (name.isEmpty) return 'AL';
     final parts = name.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
     if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.substring(0, name.length >= 2 ? 2 : 1).toUpperCase();
@@ -98,8 +121,12 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final coverCacheW = (600 * dpr).round().clamp(600, 1200);
+    final avatarCacheW = (70 * dpr).round();
     final p = _profile ?? {};
-    final name = (p['full_name'] ?? 'Alumni Unitas').toString();
+    final rawName = (p['full_name'] ?? '').toString().trim();
+    final name = rawName.isEmpty ? 'Alumni Unitas' : rawName;
     final prodi = _titleCase((p['prodi'] ?? '').toString());
     final angkatan = (p['angkatan'] ?? '').toString().trim();
     final kota = _titleCase((p['kota'] ?? '').toString());
@@ -107,7 +134,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
     final perusahaan = (p['perusahaan'] ?? '').toString().trim();
     final bio = (p['bio'] ?? '').toString().trim();
     final linkedin = (p['linkedin'] ?? '').toString().trim();
-    final avatarUrl = p['avatar_url']?.toString();
+    final avatarUrl = p['avatar_url']?.toString().trim();
     final points = (p['points'] ?? 0).toString();
 
     final jobLine = [pekerjaan, perusahaan].where((e) => e.isNotEmpty).join(' · ');
@@ -136,7 +163,32 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             color: brandNavy,
-            child: SingleChildScrollView(
+            child: (!_loading && _profile == null && _error != null)
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(32),
+                    children: [
+                      const SizedBox(height: 80),
+                      const Icon(Icons.error_outline, size: 42, color: dim2),
+                      const SizedBox(height: 12),
+                      Text(_error!, style: subTitle, textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
+                      Center(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: brandNavy,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            elevation: 0,
+                          ),
+                          onPressed: _load,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: Text('Coba Lagi', style: buttonStyle),
+                        ),
+                      ),
+                    ],
+                  )
+                : SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -150,6 +202,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                         child: Image.network(
                           'https://images.unsplash.com/photo-1748144679532-c36d9d5584e6?w=600&h=240&fit=crop',
                           fit: BoxFit.cover,
+                          cacheWidth: coverCacheW,
                           color: Colors.black54,
                           colorBlendMode: BlendMode.darken,
                           errorBuilder: (_, _, _) => Container(color: brandNavy),
@@ -205,6 +258,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                                           avatarUrl,
                                           width: 70,
                                           height: 70,
+                                          cacheWidth: avatarCacheW,
                                           fit: BoxFit.cover,
                                           gaplessPlayback: true,
                                           errorBuilder: (_, _, _) => Center(
@@ -385,8 +439,9 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                                 _infoRow(Icons.location_on_outlined, 'Kota', kota.isNotEmpty ? kota : 'Belum diisi'),
                                 if (linkedin.isNotEmpty)
                                   InkWell(
-                                    onTap: () {
-                                      Clipboard.setData(ClipboardData(text: linkedin));
+                                    onTap: () async {
+                                      await Clipboard.setData(ClipboardData(text: linkedin));
+                                      if (!context.mounted) return;
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         const SnackBar(content: Text('Link LinkedIn disalin')),
                                       );

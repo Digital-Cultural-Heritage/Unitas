@@ -36,13 +36,17 @@ class UnitasAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = avatarUrl?.trim();
     if (url != null && url.isNotEmpty) {
+      final px = (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(1, 1024);
       return ClipOval(
         child: Image.network(
           url,
           width: size,
           height: size,
+          cacheWidth: px,
+          cacheHeight: px,
           fit: BoxFit.cover,
           gaplessPlayback: true,
+          loadingBuilder: (_, child, progress) => progress == null ? child : _fallback(),
           errorBuilder: (_, _, _) => _fallback(),
         ),
       );

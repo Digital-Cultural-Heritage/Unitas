@@ -6,7 +6,7 @@ REST API untuk **Unitas — Platform Alumni Digital**, dibangun dengan Express.j
 - **Runtime**: Node.js 20+
 - **Framework**: Express.js
 - **Database**: Supabase (PostgreSQL)
-- **Auth**: Custom JWT (bcryptjs + jsonwebtoken)
+- **Auth**: Custom JWT (`bcryptjs` + `jsonwebtoken` + `google-auth-library` + `express-rate-limit`)
 - **Upload**: Multer + Sharp (konversi otomatis ke .webp) + Supabase Storage
 - **Deploy**: Vercel (Serverless)
 
@@ -23,13 +23,21 @@ npm install
 ### 2. Konfigurasi Environment
 ```bash
 cp .env.example .env
-# Edit .env dengan kredensial Supabase dan JWT secret kamu
+# Edit .env dengan kredensial Supabase, JWT secret, dan Google Client ID kamu
 ```
+
+Variabel lingkungan penting:
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`: kredensial Supabase project.
+- `JWT_SECRET`, `REFRESH_TOKEN_SECRET`: string acak panjang & unik untuk menandatangani token.
+- `GOOGLE_CLIENT_ID`: **Web OAuth 2.0 Client ID** dari Google Cloud Console (harus sama dengan `serverClientId` yang dipakai di Flutter `google_sign_in`).
+- `GOOGLE_SERVER_CLIENT_IDS` *(opsional)*: daftar Client ID tambahan dipisahkan koma (misal untuk beberapa flavor/environment).
+- `CORS_ORIGIN`: `*` atau daftar origin dipisahkan koma.
+- `RESEND_API_KEY`, `EMAIL_FROM` *(opsional)*: untuk mengirim OTP reset password via Resend.
 
 ### 3. Setup Supabase
 - Buka [Supabase Dashboard](https://supabase.com)
 - Buat project baru
-- Buka **SQL Editor** → paste isi file `supabase/migrations/001_initial_schema.sql` → Run
+- Buka **SQL Editor** → jalankan file migrasi di `supabase/migrations/` secara berurutan (`001_initial_schema.sql`, `002_add_comments.sql`, `003_add_features.sql`, `004_add_comment_replies.sql`, `005_google_auth.sql`, dan migrasi berikutnya bila ada)
 - Buka **Storage** → buat 2 bucket:
   - `avatars` (public)
   - `post-images` (public)
@@ -39,6 +47,11 @@ cp .env.example .env
 ```bash
 npm run dev
 # Server berjalan di http://localhost:3000
+```
+
+### 5. Jalankan Test
+```bash
+npm test
 ```
 
 ---
@@ -58,7 +71,7 @@ vercel --prod
 ```
 
 ### Environment Variables di Vercel
-Di Vercel Dashboard → Project → Settings → Environment Variables, tambahkan semua variable dari `.env.example`.
+Di Vercel Dashboard → Project → Settings → Environment Variables, tambahkan semua variable dari `.env.example` (minimal `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `REFRESH_TOKEN_SECRET`, serta `GOOGLE_CLIENT_ID` untuk Google Sign-In).
 
 ---
 
@@ -69,9 +82,14 @@ Di Vercel Dashboard → Project → Settings → Environment Variables, tambahka
 | GET | `/api/health` | - | Health check |
 | **Auth** | | | |
 | POST | `/api/auth/register` | - | Daftar akun baru |
-| POST | `/api/auth/login` | - | Login |
-| POST | `/api/auth/logout` | - | Logout |
-| POST | `/api/auth/refresh` | - | Refresh token |
+| POST | `/api/auth/login` | - | Login email & password |
+| POST | `/api/auth/google` | - | Login / daftar dengan Google ID token |
+| GET | `/api/auth/me` | 🔒 | Profil akun yang sedang login |
+| POST | `/api/auth/logout` | - | Logout (cabut refresh token) |
+| POST | `/api/auth/refresh` | - | Rotasi access & refresh token |
+| POST | `/api/auth/change-password` | 🔒 | Ubah password |
+| POST | `/api/auth/forgot-password` | - | Kirim OTP reset password |
+| POST | `/api/auth/reset-password` | - | Verifikasi OTP & set password baru |
 | **Users** | | | |
 | GET | `/api/users` | - | Direktori alumni |
 | GET | `/api/users/me` | 🔒 | Profil sendiri |
@@ -113,6 +131,27 @@ Authorization: Bearer <access_token>
 curl -X POST https://your-api.vercel.app/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"password123","full_name":"Budi Santoso","prodi":"Informatika","angkatan":"2020"}'
+```
+
+### Contoh Request — Google Sign-In
+```bash
+curl -X POST https://your-api.vercel.app/api/auth/google \
+  -H "Content-Type: application/json" \
+  -d '{"id_token":"<Google_ID_Token>"}'
+```
+Respons `200 OK` sama persis dengan `POST /api/auth/login`:
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "role": "alumni",
+    "full_name": "Budi Santoso",
+    "avatar_url": "https://..."
+  }
+}
 ```
 
 ### Contoh Request — Upload Foto

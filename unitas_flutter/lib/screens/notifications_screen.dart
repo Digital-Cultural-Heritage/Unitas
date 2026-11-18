@@ -15,6 +15,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _loading = true;
   bool _markingAll = false;
+  String? _error;
+  final Set<String> _markingIds = {};
 
   @override
   void initState() {
@@ -23,20 +25,44 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Future<void> _load() async {
+    if (_items.isEmpty && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    } else {
+      _error = null;
+    }
     try {
       final res = await NotificationsService.getNotifications();
       if (mounted) {
         setState(() {
-          _items = (res['data'] as List? ?? []).cast<Map<String, dynamic>>();
+          final raw = res['data'];
+          _items = (raw is List ? raw : const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          _error = null;
           _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          if (_items.isEmpty) _error = 'Gagal memuat notifikasi';
+        });
+        if (_items.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Gagal memperbarui notifikasi')),
+          );
+        }
+      }
     }
   }
 
   Future<void> _markAllRead() async {
+    if (_markingAll) return;
     setState(() => _markingAll = true);
     try {
       await NotificationsService.markAllAsRead();
@@ -47,19 +73,40 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _markingAll = false);
+      if (mounted) {
+        setState(() => _markingAll = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal menandai semua dibaca')),
+        );
+      }
     }
   }
 
   Future<void> _markOneRead(int index) async {
+    if (index < 0 || index >= _items.length) return;
     final item = _items[index];
-    if (item['is_read'] == true) return;
+    final nid = item['id']?.toString();
+    if (nid == null || nid.isEmpty) return;
+    if (item['is_read'] == true || _markingIds.contains(nid)) return;
+
+    _markingIds.add(nid);
     setState(() {
       _items[index] = {...item, 'is_read': true};
     });
     try {
-      await NotificationsService.markAsRead(item['id'].toString());
-    } catch (_) {}
+      await NotificationsService.markAsRead(nid);
+    } catch (_) {
+      if (mounted) {
+        final curIdx = _items.indexWhere((e) => e['id']?.toString() == nid);
+        if (curIdx != -1) {
+          setState(() {
+            _items[curIdx] = {..._items[curIdx], 'is_read': false};
+          });
+        }
+      }
+    } finally {
+      _markingIds.remove(nid);
+    }
   }
 
   IconData _iconForType(String type) {
@@ -139,19 +186,56 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           constraints: const BoxConstraints(maxWidth: 600),
           child: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _items.isEmpty
+          : _error != null && _items.isEmpty
               ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, size: 48, color: dim2),
+                        const SizedBox(height: 12),
+                        Text(_error!, style: subTitle.copyWith(color: dim1)),
+                        const SizedBox(height: 12),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: brandNavy,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: _load,
+                          child: const Text('Coba Lagi'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+          : _items.isEmpty
+              ? RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      const Icon(Icons.notifications_none, size: 48, color: dim2),
-                      const SizedBox(height: 12),
-                      Text('Belum ada notifikasi', style: subTitle.copyWith(color: dim1)),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Aktivitas like, komentar, dan koneksi akan muncul di sini.',
-                        style: caption,
-                        textAlign: TextAlign.center,
+                      SizedBox(
+                        height: 360,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.notifications_none, size: 48, color: dim2),
+                                const SizedBox(height: 12),
+                                Text('Belum ada notifikasi', style: subTitle.copyWith(color: dim1)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Aktivitas like, komentar, dan koneksi akan muncul di sini.',
+                                  style: caption,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -166,15 +250,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       final n = _items[i];
                       final isRead = n['is_read'] == true;
                       final type = (n['type'] ?? '').toString();
-                      final actor = n['actor'] as Map<String, dynamic>?;
+                      final actorRaw = n['actor'];
+                      final actor = actorRaw is Map ? Map<String, dynamic>.from(actorRaw) : null;
                       final profiles = actor?['user_profiles'];
                       final profile = profiles is List && profiles.isNotEmpty
-                          ? profiles.first as Map<String, dynamic>
+                          ? (profiles.first is Map ? Map<String, dynamic>.from(profiles.first as Map) : null)
                           : (profiles is Map ? Map<String, dynamic>.from(profiles) : null);
-                      final actorName = (profile?['full_name'] ?? 'Unitas').toString();
-                      final ini = (profile?['initials'] ??
-                              actorName.substring(0, actorName.length >= 2 ? 2 : 1))
-                          .toString()
+                      final rawName = (profile?['full_name'] ?? '').toString().trim();
+                      final actorName = rawName.isEmpty ? 'Unitas' : rawName;
+                      final rawIni = (profile?['initials'] ?? '').toString().trim();
+                      final ini = (rawIni.isNotEmpty
+                              ? rawIni
+                              : actorName.substring(0, actorName.length >= 2 ? 2 : 1))
                           .toUpperCase();
 
                       return InkWell(

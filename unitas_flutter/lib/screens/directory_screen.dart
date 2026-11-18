@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
@@ -17,6 +18,8 @@ class DirectoryScreen extends StatefulWidget {
 class _DirectoryScreenState extends State<DirectoryScreen> {
   final _searchCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
+  Timer? _searchDebounce;
+  int _loadSeq = 0;
   String _q = '';
   String _filter = 'Semua';
   List<Map<String, dynamic>> _alumni = [];
@@ -29,9 +32,8 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   final Map<String, String> _connectionStatus = {};
   final Set<String> _connectingIds = {};
 
-  final List<String> _filters = ['Semua', 'Terhubung', 'Jakarta', 'Lainnya'];
+  static const List<String> _filters = ['Semua', 'Terhubung', 'Jakarta', 'Lainnya'];
 
-  @override
   @override
   void initState() {
     super.initState();
@@ -40,6 +42,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   }
 
   void _onScroll() {
+    if (!_scrollCtrl.hasClients) return;
     if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
       _loadMore();
     }
@@ -55,85 +58,116 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  void _onSearchChanged(String v) {
+    _q = v;
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) _load();
+    });
+  }
+
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _error = null;
       _page = 1;
       _hasMore = true;
     });
     try {
       final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
-      var raw = await UsersService.getDirectory(
-        q: _q, kota: kota, page: 1,
+      final dirFuture = UsersService.getDirectory(
+        q: _q,
+        kota: kota,
+        page: 1,
       );
+      final meFuture = _currentUserId == null
+          ? UsersService.getMe().catchError((_) => <String, dynamic>{})
+          : null;
+
+      final raw = await dirFuture;
+      if (meFuture != null) {
+        final profile = await meFuture;
+        if (profile.isNotEmpty) {
+          _currentUserId = (profile['user_id'] ?? profile['id'])?.toString();
+        }
+      }
+
+      if (!mounted || seq != _loadSeq) return;
+
       var data = raw;
       if (_filter == 'Terhubung') {
         data = raw.where((a) => a['connection_status'] == 'accepted').toList();
       } else if (_filter == 'Lainnya') {
         // Filter "Lainnya" = bukan Jakarta
-        data = raw.where((a) => (a['kota'] ?? '') != 'Jakarta').toList();
+        data = raw.where((a) => (a['kota'] ?? '').toString() != 'Jakarta').toList();
       }
 
-      try {
-        final profile = await UsersService.getMe();
-        _currentUserId = profile['user_id']?.toString() ?? profile['id']?.toString();
-      } catch (_) {}
-
-      if (mounted) {
-        setState(() {
-          _alumni = data;
-          _hasMore = raw.length >= 30;
-          for (final a in data) {
-            final uid = a['user_id']?.toString() ?? '';
-            if (uid.isNotEmpty) {
-              _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
-            }
+      setState(() {
+        _alumni = data;
+        _hasMore = raw.length >= 30;
+        for (final a in data) {
+          final uid = a['user_id']?.toString() ?? '';
+          if (uid.isNotEmpty) {
+            _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
           }
+        }
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (mounted && seq == _loadSeq) {
+        setState(() {
+          _error = e.message;
           _loading = false;
         });
       }
-    } on ApiException catch (e) {
-      if (mounted) setState(() { _error = e.message; _loading = false; });
     } catch (_) {
-      if (mounted) setState(() { _error = 'Tidak dapat memuat data'; _loading = false; });
+      if (mounted && seq == _loadSeq) {
+        setState(() {
+          _error = 'Tidak dapat memuat data';
+          _loading = false;
+        });
+      }
     }
   }
 
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore || _loading) return;
+    final seq = _loadSeq;
     setState(() => _loadingMore = true);
     try {
       final nextPage = _page + 1;
       final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
       final raw = await UsersService.getDirectory(q: _q, kota: kota, page: nextPage);
+      if (!mounted || seq != _loadSeq) return;
       var data = raw;
       if (_filter == 'Terhubung') {
         data = raw.where((a) => a['connection_status'] == 'accepted').toList();
       } else if (_filter == 'Lainnya') {
-        data = raw.where((a) => (a['kota'] ?? '') != 'Jakarta').toList();
+        data = raw.where((a) => (a['kota'] ?? '').toString() != 'Jakarta').toList();
       }
-      if (mounted) {
-        setState(() {
-          _alumni = [..._alumni, ...data];
-          _page = nextPage;
-          _hasMore = raw.length >= 30;
-          for (final a in data) {
-            final uid = a['user_id']?.toString() ?? '';
-            if (uid.isNotEmpty) {
-              _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
-            }
+      setState(() {
+        _alumni = [..._alumni, ...data];
+        _page = nextPage;
+        _hasMore = raw.length >= 30;
+        for (final a in data) {
+          final uid = a['user_id']?.toString() ?? '';
+          if (uid.isNotEmpty) {
+            _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
           }
-          _loadingMore = false;
-        });
-      }
+        }
+        _loadingMore = false;
+      });
     } catch (_) {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && seq == _loadSeq) setState(() => _loadingMore = false);
     }
   }
 
@@ -144,15 +178,16 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   Color _colorFor(int i) => _colors[i % _colors.length];
 
   String _initials(Map<String, dynamic> a) {
-    if (a['initials'] != null) return a['initials'];
-    final name = a['full_name'] ?? '';
-    final parts = name.split(' ');
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    final rawIni = (a['initials'] ?? '').toString().trim();
+    if (rawIni.isNotEmpty) return rawIni.toUpperCase();
+    final name = (a['full_name'] ?? '').toString().trim();
+    final parts = name.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
   Future<void> _connect(String userId) async {
-    if (_connectingIds.contains(userId)) return;
+    if (userId.isEmpty || _connectingIds.contains(userId)) return;
     final currentStatus = _connectionStatus[userId] ?? 'none';
     if (currentStatus == 'accepted' || currentStatus == 'pending') return;
 
@@ -161,7 +196,8 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     try {
       final res = await UsersService.connect(userId);
       if (!mounted) return;
-      final serverStatus = res['connection']?['status']?.toString();
+      final conn = res['connection'];
+      final serverStatus = conn is Map ? conn['status']?.toString() : null;
       final msg = (res['message'] ?? '').toString();
       final nextStatus = (serverStatus == 'accepted' ||
               msg == 'Sudah terhubung' ||
@@ -242,7 +278,12 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(p['full_name'] ?? '—', style: subTitle.copyWith(fontSize: 17)),
+                      Text(
+                        (p['full_name'] ?? '').toString().trim().isNotEmpty
+                            ? p['full_name'].toString()
+                            : '—',
+                        style: subTitle.copyWith(fontSize: 17),
+                      ),
                       if (prodi.isNotEmpty || angkatan.isNotEmpty) ...[
                         const SizedBox(height: 3),
                         Text(
@@ -342,6 +383,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () {
+                    if (userId.isEmpty) return;
                     Navigator.pop(ctx);
                     Navigator.push(
                       context,
@@ -459,6 +501,110 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     );
   }
 
+  Widget _buildAlumniCard(int i, Map<String, dynamic> p) {
+    final userId = p['user_id']?.toString() ?? '';
+    final isMe = _currentUserId != null && userId == _currentUserId;
+    final isOnline = p['is_online'] == true;
+    final prodi = (p['prodi'] ?? '').toString().trim();
+    final angkatan = (p['angkatan'] ?? '').toString().trim();
+    final short = angkatan.length >= 2 ? angkatan.substring(angkatan.length - 2) : angkatan;
+    final badgeText = short.isNotEmpty
+        ? (prodi.isNotEmpty ? "$prodi '$short" : "'$short")
+        : prodi;
+    final kota = (p['kota'] ?? '').toString().trim();
+    final fullName = (p['full_name'] ?? '').toString().trim();
+    final jobLine = '${p['pekerjaan'] ?? ''} · ${p['perusahaan'] ?? ''}'
+        .trim()
+        .replaceAll(RegExp(r'^\s*·\s*|\s*·\s*$'), '');
+    final avatarColor = _colorFor(i);
+
+    return RepaintBoundary(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+        ),
+        child: InkWell(
+          onTap: () => _showAlumniDetail(p, avatarColor, isMe),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              UnitasAvatar(
+                initials: _initials(p),
+                color: avatarColor,
+                size: 46,
+                avatarUrl: p['avatar_url']?.toString(),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Flexible(
+                      child: Text(
+                        fullName.isNotEmpty ? fullName : '—',
+                        style: subTitle,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isOnline) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(color: brandGreen, shape: BoxShape.circle),
+                      ),
+                    ],
+                  ]),
+                  if (jobLine.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(jobLine, style: caption, overflow: TextOverflow.ellipsis),
+                  ],
+                  if (badgeText.isNotEmpty || kota.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      if (badgeText.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: card,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Text(badgeText, style: caption.copyWith(fontSize: 11)),
+                        ),
+                      if (kota.isNotEmpty) ...[
+                        if (badgeText.isNotEmpty) const SizedBox(width: 8),
+                        const Icon(Icons.location_on_outlined, size: 12, color: dim2),
+                        const SizedBox(width: 2),
+                        Flexible(child: Text(kota, style: caption, overflow: TextOverflow.ellipsis)),
+                      ],
+                    ]),
+                  ],
+                ]),
+              ),
+              const SizedBox(width: 8),
+              if (isMe)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: card,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Text('Kamu', style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600)),
+                )
+              else
+                _buildConnectButton(userId),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -469,206 +615,174 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             color: brandNavy,
-            child: SingleChildScrollView(
+            child: CustomScrollView(
               controller: _scrollCtrl,
               physics: const AlwaysScrollableScrollPhysics(),
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  // Header
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${_alumni.isNotEmpty ? _alumni.length.toString() : "—"} alumni ditemukan', style: caption),
-                      Text('Direktori Alumni', style: heading),
-                    ]),
-                  ),
-          // Search
-          Container(
-            margin: const EdgeInsets.fromLTRB(22, 0, 22, 16),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            decoration: BoxDecoration(
-              color: surface, borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor),
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (v) { _q = v; _load(); },
-              style: body,
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                hintText: 'Cari nama atau jurusan…',
-                hintStyle: body.copyWith(color: dim2),
-                icon: Icon(Icons.search, color: dim2, size: 18),
-                suffixIcon: _q.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.close, size: 18, color: dim2),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          _q = '';
-                          _load();
-                        },
-                      )
-                    : null,
-              ),
-            ),
-          ),
-          // Filters
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 22),
-              children: _filters.map((f) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () { setState(() => _filter = f); _load(); },
-                  child: Container(
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _filter == f ? brandNavy : Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _filter == f ? brandNavy : borderColor),
-                    ),
-                    child: Text(f, style: caption.copyWith(
-                      color: _filter == f ? Colors.white : dim1,
-                      fontWeight: _filter == f ? FontWeight.w600 : FontWeight.w400,
-                    )),
-                  ),
-                ),
-              )).toList(),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Content
-          if (_loading)
-            const DirectorySkeletonList()
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(22),
-              child: Text(_error!, style: caption.copyWith(color: dim2)),
-            )
-          else if (_alumni.isEmpty)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-              decoration: BoxDecoration(
-                color: surface,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: borderColor),
-              ),
-              child: Column(children: [
-                Container(
-                  width: 60, height: 60,
-                  decoration: BoxDecoration(
-                    color: brandGold.withValues(alpha: 0.16),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.people_outline, color: brandNavy, size: 28),
-                ),
-                const SizedBox(height: 14),
-                Text('Tidak ada alumni ditemukan', style: subTitle.copyWith(fontSize: 16)),
-                const SizedBox(height: 4),
-                Text('Coba ubah kata kunci pencarian atau filter kota.', style: caption, textAlign: TextAlign.center),
-              ]),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22),
-              child: Column(
-                children: _alumni.asMap().entries.map((e) {
-                  final i = e.key; final p = e.value;
-                  final userId = p['user_id']?.toString() ?? '';
-                  final isMe = _currentUserId != null && userId == _currentUserId;
-                  final isOnline = p['is_online'] == true;
-                  final prodi = (p['prodi'] ?? '').toString();
-                  final angkatan = (p['angkatan'] ?? '').toString();
-                  final short = angkatan.length >= 2 ? angkatan.substring(angkatan.length - 2) : angkatan;
-                  final jobLine = '${p['pekerjaan'] ?? ''} · ${p['perusahaan'] ?? ''}'
-                      .trim()
-                      .replaceAll(RegExp(r'^\s*·\s*|\s*·\s*$'), '');
-                  final avatarColor = _colorFor(i);
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    decoration: BoxDecoration(
-                      color: surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: borderColor),
-                    ),
-                    child: InkWell(
-                      onTap: () => _showAlumniDetail(p, avatarColor, isMe),
-                      borderRadius: BorderRadius.circular(16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Row(children: [
-                          UnitasAvatar(
-                            initials: _initials(p),
-                            color: avatarColor,
-                            size: 46,
-                            avatarUrl: p['avatar_url']?.toString(),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Row(children: [
-                              Flexible(child: Text(p['full_name'] ?? '—', style: subTitle, overflow: TextOverflow.ellipsis)),
-                              if (isOnline) ...[
-                                const SizedBox(width: 6),
-                                Container(width: 6, height: 6,
-                                  decoration: const BoxDecoration(color: brandGreen, shape: BoxShape.circle)),
-                              ],
-                            ]),
-                            if (jobLine.isNotEmpty) ...[
-                              const SizedBox(height: 2),
-                              Text(jobLine, style: caption, overflow: TextOverflow.ellipsis),
-                            ],
-                            const SizedBox(height: 6),
-                            Row(children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: card, borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: borderColor),
-                                ),
-                                child: Text("$prodi '$short", style: caption.copyWith(fontSize: 11)),
-                              ),
-                              if ((p['kota'] ?? '').toString().isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.location_on_outlined, size: 12, color: dim2),
-                                const SizedBox(width: 2),
-                                Flexible(child: Text(p['kota'], style: caption, overflow: TextOverflow.ellipsis)),
-                              ],
-                            ]),
-                          ])),
-                          const SizedBox(width: 8),
-                          if (isMe)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: card,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: borderColor),
-                              ),
-                              child: Text('Kamu', style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600)),
-                            )
-                          else
-                            _buildConnectButton(userId),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('${_alumni.isNotEmpty ? _alumni.length.toString() : "—"} alumni ditemukan', style: caption),
+                          Text('Direktori Alumni', style: heading),
                         ]),
                       ),
+                      // Search
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(22, 0, 22, 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: TextField(
+                          controller: _searchCtrl,
+                          onChanged: _onSearchChanged,
+                          onSubmitted: (_) {
+                            _searchDebounce?.cancel();
+                            _load();
+                          },
+                          style: body,
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'Cari nama atau jurusan…',
+                            hintStyle: body.copyWith(color: dim2),
+                            icon: const Icon(Icons.search, color: dim2, size: 18),
+                            suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                              valueListenable: _searchCtrl,
+                              builder: (_, val, _) => val.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.close, size: 18, color: dim2),
+                                      onPressed: () {
+                                        _searchDebounce?.cancel();
+                                        _searchCtrl.clear();
+                                        _q = '';
+                                        _load();
+                                      },
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Filters
+                      SizedBox(
+                        height: 36,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 22),
+                          children: _filters.map((f) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: GestureDetector(
+                              onTap: () {
+                                if (_filter == f) return;
+                                _searchDebounce?.cancel();
+                                setState(() => _filter = f);
+                                _load();
+                              },
+                              child: Container(
+                                alignment: Alignment.center,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: _filter == f ? brandNavy : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: _filter == f ? brandNavy : borderColor),
+                                ),
+                                child: Text(f, style: caption.copyWith(
+                                  color: _filter == f ? Colors.white : dim1,
+                                  fontWeight: _filter == f ? FontWeight.w600 : FontWeight.w400,
+                                )),
+                              ),
+                            ),
+                          )).toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ),
+                if (_loading)
+                  const SliverToBoxAdapter(child: DirectorySkeletonList())
+                else if (_error != null)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(22),
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.error_outline, color: dim2, size: 32),
+                            const SizedBox(height: 8),
+                            Text(_error!, style: caption.copyWith(color: dim1), textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: brandNavy,
+                                foregroundColor: Colors.white,
+                              ),
+                              onPressed: _load,
+                              child: const Text('Coba Lagi'),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  );
-                }).toList(),
-              ),
-            ),
-          if (_loadingMore)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            ),
-        ]),
-              ),
+                  )
+                else if (_alumni.isEmpty)
+                  SliverToBoxAdapter(
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Column(children: [
+                        Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            color: brandGold.withValues(alpha: 0.16),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.people_outline, color: brandNavy, size: 28),
+                        ),
+                        const SizedBox(height: 14),
+                        Text('Tidak ada alumni ditemukan', style: subTitle.copyWith(fontSize: 16)),
+                        const SizedBox(height: 4),
+                        Text('Coba ubah kata kunci pencarian atau filter kota.', style: caption, textAlign: TextAlign.center),
+                      ]),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    sliver: SliverList.builder(
+                      itemCount: _alumni.length,
+                      itemBuilder: (_, i) => _buildAlumniCard(i, _alumni[i]),
+                    ),
+                  ),
+                if (_loadingMore)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                  ),
+                const SliverToBoxAdapter(child: SizedBox(height: 16)),
+              ],
             ),
           ),
         ),

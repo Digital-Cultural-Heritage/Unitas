@@ -18,7 +18,11 @@ class PostDetailScreen extends StatefulWidget {
 class _PostDetailScreenState extends State<PostDetailScreen> {
   List<Map<String, dynamic>> _comments = [];
   bool _loading = true;
+  String? _error;
   bool _submitting = false;
+  bool _liking = false;
+  bool _mutatingPost = false;
+  final Set<String> _deletingCommentIds = {};
   final _commentCtrl = TextEditingController();
   final _commentFocus = FocusNode();
   Map<String, dynamic>? _me;
@@ -49,51 +53,90 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   String? get _myId => (_me?['user_id'] ?? _me?['id'])?.toString();
 
   Future<void> _load() async {
-    try {
-      final results = await Future.wait([
-        PostsService.getComments(widget.post['id'].toString()),
-        UsersService.getMe().catchError((_) => <String, dynamic>{}),
-      ]);
+    final postId = widget.post['id']?.toString();
+    if (postId == null || postId.isEmpty) {
       if (mounted) {
         setState(() {
-          _comments = results[0] as List<Map<String, dynamic>>;
-          _me = results[1] as Map<String, dynamic>?;
+          _loading = false;
+          _error = 'Postingan tidak valid';
+        });
+      }
+      return;
+    }
+    if (_comments.isEmpty && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    } else {
+      _error = null;
+    }
+    try {
+      final results = await Future.wait([
+        PostsService.getComments(postId),
+        _me == null
+            ? UsersService.getMe().catchError((_) => <String, dynamic>{})
+            : Future.value(_me!),
+      ]);
+      if (mounted) {
+        final rawComments = results[0];
+        final rawMe = results[1];
+        setState(() {
+          _comments = rawComments is List
+              ? rawComments.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+              : [];
+          _me = rawMe is Map ? Map<String, dynamic>.from(rawMe) : null;
+          _error = null;
           _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          if (_comments.isEmpty) _error = 'Gagal memuat komentar';
+        });
+      }
     }
   }
 
   bool _isMyComment(Map<String, dynamic> c) {
     final myId = _myId;
-    final authorId = (c['user']?['id'] ?? c['user_id'])?.toString();
+    final userRaw = c['user'];
+    final authorId = ((userRaw is Map ? userRaw['id'] : null) ?? c['user_id'])?.toString();
     return myId != null && myId.isNotEmpty && authorId != null && myId == authorId;
   }
 
   Future<void> _toggleLike() async {
+    if (_liking) return;
     final postId = widget.post['id']?.toString();
-    if (postId == null) return;
+    if (postId == null || postId.isEmpty) return;
+    _liking = true;
     final wasLiked = _liked;
+    final originalLikes = _likesCount;
     setState(() {
       _liked = !wasLiked;
-      _likesCount = (_likesCount + (wasLiked ? -1 : 1)).clamp(0, 999999);
+      _likesCount = (originalLikes + (wasLiked ? -1 : 1)).clamp(0, 999999);
     });
     try {
       final serverLiked = await PostsService.toggleLike(postId);
       if (mounted && serverLiked != _liked) {
         setState(() {
           _liked = serverLiked;
+          _likesCount = (serverLiked == wasLiked)
+              ? originalLikes
+              : (originalLikes + (serverLiked ? 1 : -1)).clamp(0, 999999);
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _liked = wasLiked;
-          _likesCount = (_likesCount + (wasLiked ? 1 : -1)).clamp(0, 999999);
+          _likesCount = originalLikes;
         });
       }
+    } finally {
+      _liking = false;
     }
   }
 
@@ -129,8 +172,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _deleteComment(String commentId) async {
+    final postId = widget.post['id']?.toString();
+    if (postId == null || postId.isEmpty || _deletingCommentIds.contains(commentId)) return;
+    _deletingCommentIds.add(commentId);
     try {
-      await PostsService.deleteComment(widget.post['id'].toString(), commentId);
+      await PostsService.deleteComment(postId, commentId);
       if (mounted) {
         setState(() {
           _comments.removeWhere(
@@ -147,17 +193,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           const SnackBar(content: Text('Gagal menghapus komentar')),
         );
       }
+    } finally {
+      _deletingCommentIds.remove(commentId);
     }
   }
 
   Future<void> _submitComment() async {
+    final postId = widget.post['id']?.toString();
     final text = _commentCtrl.text.trim();
-    if (text.isEmpty || _submitting) return;
+    if (postId == null || postId.isEmpty || text.isEmpty || _submitting) return;
     setState(() => _submitting = true);
     try {
       final parentId = _replyToCommentId;
       final newComment = await PostsService.addComment(
-        widget.post['id'].toString(),
+        postId,
         text,
         parentId: parentId,
       );
@@ -184,37 +233,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _editPost() async {
+    if (_mutatingPost) return;
     final postId = widget.post['id']?.toString();
-    if (postId == null) return;
-    final ctrl = TextEditingController(text: _postContent);
+    if (postId == null || postId.isEmpty) return;
     final updated = await showDialog<String>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Edit Postingan'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 5,
-          minLines: 2,
-          decoration: const InputDecoration(
-            hintText: 'Tulis pembaruan…',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Batal')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: brandNavy),
-            onPressed: () {
-              final txt = ctrl.text.trim();
-              if (txt.isNotEmpty) Navigator.pop(c, txt);
-            },
-            child: const Text('Simpan'),
-          ),
-        ],
-      ),
+      builder: (_) => _EditPostDialog(initialContent: _postContent),
     );
-    if (updated == null) return;
+    if (updated == null || !mounted) return;
 
+    _mutatingPost = true;
     try {
       await PostsService.updatePost(postId, updated);
       if (mounted) {
@@ -229,6 +257,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           const SnackBar(content: Text('Gagal memperbarui postingan')),
         );
       }
+    } finally {
+      _mutatingPost = false;
     }
   }
 
@@ -242,7 +272,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             child: InteractiveViewer(
               minScale: 0.8,
               maxScale: 4.0,
-              child: Image.network(url, fit: BoxFit.contain),
+              child: Image.network(
+                url,
+                fit: BoxFit.contain,
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : const Center(child: CircularProgressIndicator(color: Colors.white)),
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48),
+                ),
+              ),
             ),
           ),
           Positioned(
@@ -262,6 +301,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _deletePost() async {
+    if (_mutatingPost) return;
+    final postId = widget.post['id']?.toString();
+    if (postId == null || postId.isEmpty) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -276,18 +318,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ],
       ),
     );
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
+    _mutatingPost = true;
     try {
-      await PostsService.deletePost(widget.post['id'].toString());
+      await PostsService.deletePost(postId);
+      if (!mounted) return;
       widget.onPostDeleted();
-      if (mounted) Navigator.pop(context);
+      Navigator.pop(context);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Gagal menghapus postingan')),
         );
       }
+    } finally {
+      _mutatingPost = false;
     }
   }
 
@@ -309,7 +355,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final u = obj['user'];
     if (u is Map) {
       final p = u['user_profiles'];
-      if (p is List && p.isNotEmpty) return Map<String, dynamic>.from(p.first);
+      if (p is List && p.isNotEmpty && p.first is Map) {
+        return Map<String, dynamic>.from(p.first as Map);
+      }
       if (p is Map) return Map<String, dynamic>.from(p);
     }
     return {};
@@ -317,8 +365,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   String _initials(Map<String, dynamic> p) {
     final ini = (p['initials'] ?? '').toString().trim();
-    if (ini.isNotEmpty) return ini;
-    final name = (p['full_name'] ?? 'AL').toString().trim();
+    if (ini.isNotEmpty) return ini.toUpperCase();
+    final rawName = (p['full_name'] ?? '').toString().trim();
+    final name = rawName.isEmpty ? 'AL' : rawName;
     final parts = name.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
     if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.substring(0, name.length >= 2 ? 2 : 1).toUpperCase();
@@ -343,8 +392,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final postProfile = _profile(widget.post);
-    final posterId = (widget.post['user']?['id'] ?? widget.post['user_id'])?.toString();
+    final postUser = widget.post['user'];
+    final posterId = ((postUser is Map ? postUser['id'] : null) ?? widget.post['user_id'])?.toString();
     final amIOwner = _myId != null && posterId != null && _myId == posterId;
+    final posterNameRaw = (postProfile['full_name'] ?? '').toString().trim();
+    final posterName = posterNameRaw.isEmpty ? 'Alumni Unitas' : posterNameRaw;
+    final posterProdi = (postProfile['prodi'] ?? '').toString().trim();
+    final posterAngkatan = (postProfile['angkatan'] ?? '').toString().trim();
+    final postImageUrl = widget.post['image_url']?.toString().trim();
+    final imageCacheWidth = (600 * MediaQuery.devicePixelRatioOf(context)).round().clamp(300, 1440);
 
     final topComments = _comments.where((c) => c['parent_id'] == null).toList();
     final repliesByParent = <String, List<Map<String, dynamic>>>{};
@@ -354,6 +410,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         repliesByParent.putIfAbsent(pid, () => []).add(c);
       }
     }
+
+    final showCommentsPlaceholder = _loading || _error != null || _comments.isEmpty;
+    final itemCount = 1 + (showCommentsPlaceholder ? 0 : topComments.length);
 
     return Scaffold(
       backgroundColor: brandBg,
@@ -407,137 +466,181 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 600),
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    // Post Original
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        GestureDetector(
-                          onTap: () => _openUserProfile(posterId, postProfile),
-                          child: UnitasAvatar(
-                            initials: _initials(postProfile),
-                            color: _colorFor(posterId ?? postProfile['full_name'] ?? '?'),
-                            size: 40,
-                            avatarUrl: postProfile['avatar_url']?.toString(),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              GestureDetector(
-                                onTap: () => _openUserProfile(posterId, postProfile),
-                                child: Row(
-                                  children: [
-                                    Text(
-                                      postProfile['full_name'] ?? 'Alumni Unitas',
-                                      style: subTitle.copyWith(fontSize: 15),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(_timeAgo(widget.post['created_at']?.toString()), style: caption),
-                                  ],
-                                ),
-                              ),
-                              if (postProfile['prodi'] != null)
-                                Text(
-                                  '${postProfile['prodi']} ${postProfile['angkatan'] ?? ''}'.trim(),
-                                  style: caption,
-                                ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _postContent,
-                                style: body.copyWith(color: textPrimary, height: 1.45),
-                              ),
-                              if (widget.post['image_url'] != null) ...[
-                                const SizedBox(height: 12),
+                child: RefreshIndicator(
+                  onRefresh: _load,
+                  color: brandNavy,
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: itemCount,
+                    itemBuilder: (_, index) {
+                      if (index == 0) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Post Original
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 GestureDetector(
-                                  onTap: () => _openImageViewer(widget.post['image_url'].toString()),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      widget.post['image_url'].toString(),
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, _, _) => const SizedBox(),
-                                    ),
+                                  onTap: () => _openUserProfile(posterId, postProfile),
+                                  child: UnitasAvatar(
+                                    initials: _initials(postProfile),
+                                    color: _colorFor(posterId ?? posterName),
+                                    size: 40,
+                                    avatarUrl: postProfile['avatar_url']?.toString(),
                                   ),
                                 ),
-                              ],
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  InkWell(
-                                    onTap: _toggleLike,
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            _liked ? Icons.favorite : Icons.favorite_border,
-                                            size: 19,
-                                            color: _liked ? const Color(0xFFE54D4D) : dim1,
-                                          ),
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            '$_likesCount',
-                                            style: caption.copyWith(
-                                              color: _liked ? const Color(0xFFE54D4D) : dim1,
-                                              fontWeight: FontWeight.w600,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () => _openUserProfile(posterId, postProfile),
+                                        child: Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                posterName,
+                                                style: subTitle.copyWith(fontSize: 15),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
                                             ),
+                                            const SizedBox(width: 8),
+                                            Text(_timeAgo(widget.post['created_at']?.toString()), style: caption),
+                                          ],
+                                        ),
+                                      ),
+                                      if (posterProdi.isNotEmpty || posterAngkatan.isNotEmpty)
+                                        Text(
+                                          '$posterProdi $posterAngkatan'.trim(),
+                                          style: caption,
+                                        ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        _postContent,
+                                        style: body.copyWith(color: textPrimary, height: 1.45),
+                                      ),
+                                      if (postImageUrl != null && postImageUrl.isNotEmpty) ...[
+                                        const SizedBox(height: 12),
+                                        GestureDetector(
+                                          onTap: () => _openImageViewer(postImageUrl),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(12),
+                                            child: Image.network(
+                                              postImageUrl,
+                                              fit: BoxFit.cover,
+                                              cacheWidth: imageCacheWidth,
+                                              loadingBuilder: (_, child, progress) {
+                                                if (progress == null) return child;
+                                                return Container(
+                                                  height: 180,
+                                                  width: double.infinity,
+                                                  color: card,
+                                                  alignment: Alignment.center,
+                                                  child: const CircularProgressIndicator(strokeWidth: 2),
+                                                );
+                                              },
+                                              errorBuilder: (_, _, _) => const SizedBox(),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          InkWell(
+                                            onTap: _toggleLike,
+                                            borderRadius: BorderRadius.circular(8),
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    _liked ? Icons.favorite : Icons.favorite_border,
+                                                    size: 19,
+                                                    color: _liked ? const Color(0xFFE54D4D) : dim1,
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  Text(
+                                                    '$_likesCount',
+                                                    style: caption.copyWith(
+                                                      color: _liked ? const Color(0xFFE54D4D) : dim1,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 16),
+                                          Row(
+                                            children: [
+                                              Icon(Icons.chat_bubble_outline, size: 18, color: dim1),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                '${_comments.length}',
+                                                style: caption.copyWith(color: dim1, fontWeight: FontWeight.w600),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
-                                    ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 16),
-                                  Row(
+                                ),
+                              ],
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 14),
+                              child: Divider(height: 1, thickness: 1, color: borderColor),
+                            ),
+                            Text(
+                              'Komentar (${_comments.length})',
+                              style: label,
+                            ),
+                            const SizedBox(height: 14),
+                            if (_loading)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 24),
+                                child: Center(child: CircularProgressIndicator()),
+                              )
+                            else if (_error != null && _comments.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 20),
+                                child: Center(
+                                  child: Column(
                                     children: [
-                                      Icon(Icons.chat_bubble_outline, size: 18, color: dim1),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        '${_comments.length}',
-                                        style: caption.copyWith(color: dim1, fontWeight: FontWeight.w600),
+                                      Text(_error!, style: caption.copyWith(color: dim1)),
+                                      const SizedBox(height: 8),
+                                      TextButton(
+                                        onPressed: _load,
+                                        child: const Text('Coba Lagi'),
                                       ),
                                     ],
                                   ),
-                                ],
+                                ),
+                              )
+                            else if (_comments.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 24),
+                                child: Center(
+                                  child: Text('Belum ada komentar. Jadilah yang pertama!', style: caption),
+                                ),
                               ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child: Divider(height: 1, thickness: 1, color: borderColor),
-                    ),
-                    Text(
-                      'Komentar (${_comments.length})',
-                      style: label,
-                    ),
-                    const SizedBox(height: 14),
+                          ],
+                        );
+                      }
 
-                    if (_loading)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 24),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (_comments.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 24),
-                        child: Center(child: Text('Belum ada komentar. Jadilah yang pertama!', style: caption)),
-                      )
-                    else
-                      ...topComments.map((c) {
-                        final cid = c['id']?.toString() ?? '';
-                        final replies = repliesByParent[cid] ?? [];
-                        final isExpanded = _expandedThreads.contains(cid) || replies.length <= 2;
-                        final visibleReplies = isExpanded ? replies : replies.take(1).toList();
+                      final c = topComments[index - 1];
+                      final cid = c['id']?.toString() ?? '';
+                      final replies = repliesByParent[cid] ?? [];
+                      final isExpanded = _expandedThreads.contains(cid) || replies.length <= 2;
+                      final visibleReplies = isExpanded ? replies : replies.take(1).toList();
 
-                        return Column(
+                      return RepaintBoundary(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _buildCommentRow(c, isReply: false),
@@ -584,9 +687,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ),
                               ),
                           ],
-                        );
-                      }),
-                  ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
@@ -685,8 +789,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     String? rootParentId,
   }) {
     final p = _profile(c);
-    final authorId = (c['user']?['id'] ?? c['user_id'])?.toString();
-    final name = (p['full_name'] ?? 'Alumni Unitas').toString();
+    final userRaw = c['user'];
+    final authorId = ((userRaw is Map ? userRaw['id'] : null) ?? c['user_id'])?.toString();
+    final rawName = (p['full_name'] ?? '').toString().trim();
+    final name = rawName.isEmpty ? 'Alumni Unitas' : rawName;
 
     return Padding(
       padding: EdgeInsets.only(bottom: isReply ? 12 : 14),
@@ -709,16 +815,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               children: [
                 Row(
                   children: [
-                    GestureDetector(
-                      onTap: () => _openUserProfile(authorId, p),
-                      child: Text(
-                        name,
-                        style: body.copyWith(fontWeight: FontWeight.w600, fontSize: 13, color: textPrimary),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: GestureDetector(
+                              onTap: () => _openUserProfile(authorId, p),
+                              child: Text(
+                                name,
+                                style: body.copyWith(fontWeight: FontWeight.w600, fontSize: 13, color: textPrimary),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(_timeAgo(c['created_at']?.toString()), style: caption.copyWith(fontSize: 11)),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Text(_timeAgo(c['created_at']?.toString()), style: caption.copyWith(fontSize: 11)),
-                    const Spacer(),
                     if (_isMyComment(c) && c['id'] != null)
                       InkWell(
                         onTap: () => _deleteComment(c['id'].toString()),
@@ -771,6 +885,57 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             TextSpan(text: match.group(2), style: baseStyle),
         ],
       ),
+    );
+  }
+}
+
+class _EditPostDialog extends StatefulWidget {
+  final String initialContent;
+  const _EditPostDialog({required this.initialContent});
+
+  @override
+  State<_EditPostDialog> createState() => _EditPostDialogState();
+}
+
+class _EditPostDialogState extends State<_EditPostDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialContent);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Postingan'),
+      content: TextField(
+        controller: _ctrl,
+        maxLines: 5,
+        minLines: 2,
+        decoration: const InputDecoration(
+          hintText: 'Tulis pembaruan…',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: brandNavy),
+          onPressed: () {
+            final txt = _ctrl.text.trim();
+            if (txt.isNotEmpty) Navigator.pop(context, txt);
+          },
+          child: const Text('Simpan'),
+        ),
+      ],
     );
   }
 }

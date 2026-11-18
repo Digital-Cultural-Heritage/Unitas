@@ -2,20 +2,24 @@
 
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const match = typeof authHeader === "string" && /^Bearer\s+(\S+)$/i.exec(authHeader);
+  if (!match) {
     return res.status(401).json({ error: "Token tidak ditemukan" });
   }
 
-  const token = authHeader.split(" ")[1];
   try {
-    const decoded = verifyAccessToken(token);
+    const decoded = verifyAccessToken(match[1]);
     req.user = decoded; // { userId, email, role }
     next();
   } catch (err) {
     if (err.name === "TokenExpiredError") {
       return res.status(401).json({ error: "Token sudah kedaluwarsa" });
     }
-    return res.status(401).json({ error: "Token tidak valid" });
+    if (err.name === "JsonWebTokenError" || err.name === "NotBeforeError") {
+      return res.status(401).json({ error: "Token tidak valid" });
+    }
+    // Misal konfigurasi secret hilang -> 500 lewat error handler
+    next(err);
   }
 }
 

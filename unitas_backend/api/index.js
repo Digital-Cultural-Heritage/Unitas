@@ -3,27 +3,24 @@ const express = require("express");
 const cors = require("cors");
 const { errorHandler } = require("../src/middleware/errorHandler");
 
-// Routes
-const authRoutes   = require("../src/routes/auth");
-const usersRoutes  = require("../src/routes/users");
-const postsRoutes  = require("../src/routes/posts");
-const eventsRoutes = require("../src/routes/events");
-const jobsRoutes   = require("../src/routes/jobs");
-const uploadRoutes = require("../src/routes/upload");
-const statsRoutes  = require("../src/routes/stats");
-const notificationsRoutes = require("../src/routes/notifications");
-const messagesRoutes      = require("../src/routes/messages");
-
 const app = express();
 
+app.disable("x-powered-by");
+// Di Vercel ada 1 proxy di depan -> IP klien yang benar untuk rate limiting
+if (process.env.VERCEL) app.set("trust proxy", 1);
+
 // ── Middleware ────────────────────────────────────────────────────────────
+// Auth memakai header Bearer (bukan cookie), jadi origin "*" aman secara default.
+// Batasi dengan CORS_ORIGIN (pisahkan koma untuk beberapa origin) bila perlu.
+const corsOrigin = (process.env.CORS_ORIGIN || "*").trim();
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  origin: corsOrigin === "*" ? "*" : corsOrigin.split(",").map((s) => s.trim()).filter(Boolean),
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  maxAge: 86400,
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 // ── Health check ──────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
@@ -39,16 +36,38 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ── API Routes ────────────────────────────────────────────────────────────
-app.use("/api/auth",   authRoutes);
-app.use("/api/users",  usersRoutes);
-app.use("/api/posts",  postsRoutes);
-app.use("/api/events", eventsRoutes);
-app.use("/api/jobs",   jobsRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/stats",  statsRoutes);
-app.use("/api/notifications", notificationsRoutes);
-app.use("/api/messages",      messagesRoutes);
+// Lazy-load tiap router agar cold start serverless tidak memuat dependensi berat
+// (mis. sharp/multer/google-auth-library) pada endpoint yang tidak memakainya.
+function lazyRoute(modulePath) {
+  let router;
+  return (req, res, next) => {
+    if (!router) router = require(modulePath);
+    return router(req, res, next);
+  };
+}
+
+// ── Cek konfigurasi wajib ─────────────────────────────────────────────────
+const REQUIRED_ENV = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "JWT_SECRET", "REFRESH_TOKEN_SECRET"];
+const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
+
+if (missingEnv.length > 0) {
+  // Jangan crash saat cold start: laporkan jelas di log, balas 503 generik ke klien
+  console.error(`[Config] Environment variable belum diset: ${missingEnv.join(", ")}`);
+  app.use("/api", (req, res) => {
+    res.status(503).json({ error: "Server belum dikonfigurasi dengan benar" });
+  });
+} else {
+  // ── API Routes ──────────────────────────────────────────────────────────
+  app.use("/api/auth",          lazyRoute("../src/routes/auth"));
+  app.use("/api/users",         lazyRoute("../src/routes/users"));
+  app.use("/api/posts",         lazyRoute("../src/routes/posts"));
+  app.use("/api/events",        lazyRoute("../src/routes/events"));
+  app.use("/api/jobs",          lazyRoute("../src/routes/jobs"));
+  app.use("/api/upload",        lazyRoute("../src/routes/upload"));
+  app.use("/api/stats",         lazyRoute("../src/routes/stats"));
+  app.use("/api/notifications", lazyRoute("../src/routes/notifications"));
+  app.use("/api/messages",      lazyRoute("../src/routes/messages"));
+}
 
 // ── 404 handler ───────────────────────────────────────────────────────────
 app.use((req, res) => {

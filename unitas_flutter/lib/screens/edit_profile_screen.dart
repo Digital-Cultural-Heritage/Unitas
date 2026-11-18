@@ -30,6 +30,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   XFile? _pickedAvatar;
   Uint8List? _pickedAvatarBytes;
   bool _loading = false;
+  bool _picking = false;
 
   @override
   void initState() {
@@ -69,36 +70,55 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _pickAvatar() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
+    if (_picking || _loading) return;
+    _picking = true;
     try {
-      ImageValidator.validate(bytes, picked.name);
-    } on ImageValidationException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+        maxWidth: 2048,
+        maxHeight: 2048,
+      );
+      if (picked == null || !mounted) return;
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      try {
+        ImageValidator.validate(bytes, picked.name);
+      } on ImageValidationException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        }
+        return;
       }
-      return;
-    }
-    if (!mounted) return;
-    final cropped = await showImageCropDialog(
-      context,
-      bytes,
-      aspectRatio: 1.0,
-      isCircle: true,
-      title: 'Sesuaikan Foto Profil',
-    );
-    if (cropped != null && mounted) {
-      setState(() {
-        _pickedAvatar = picked;
-        _pickedAvatarBytes = cropped;
-      });
+      if (!mounted) return;
+      final cropped = await showImageCropDialog(
+        context,
+        bytes,
+        aspectRatio: 1.0,
+        isCircle: true,
+        title: 'Sesuaikan Foto Profil',
+      );
+      if (cropped != null && mounted) {
+        setState(() {
+          _pickedAvatar = picked;
+          _pickedAvatarBytes = cropped;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memilih foto')),
+        );
+      }
+    } finally {
+      _picking = false;
     }
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_loading) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _loading = true);
 
     try {
@@ -126,6 +146,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
         Navigator.pop(context, true);
       }
+    } on ImageValidationException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -143,6 +167,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final initialAvatarUrl = widget.initialProfile['avatar_url']?.toString().trim() ?? '';
+    final rawInitials = widget.initialProfile['initials']?.toString().trim() ?? '';
+    final displayInitials = rawInitials.isNotEmpty ? rawInitials : _initials();
+    final avatarCachePx = (76 * MediaQuery.devicePixelRatioOf(context)).round();
+
     return Scaffold(
       backgroundColor: brandBg,
       appBar: AppBar(
@@ -190,21 +219,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 ClipOval(
                                   child: Image.memory(
                                     _pickedAvatarBytes!,
+                                    cacheWidth: avatarCachePx,
+                                    gaplessPlayback: true,
                                     width: 76,
                                     height: 76,
                                     fit: BoxFit.cover,
                                   ),
                                 )
-                              else if (widget.initialProfile['avatar_url'] != null &&
-                                  widget.initialProfile['avatar_url'].toString().isNotEmpty)
+                              else if (initialAvatarUrl.isNotEmpty)
                                 ClipOval(
                                   child: Image.network(
-                                    widget.initialProfile['avatar_url'],
+                                    initialAvatarUrl,
+                                    cacheWidth: avatarCachePx,
+                                    gaplessPlayback: true,
                                     width: 76,
                                     height: 76,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, _, _) => UnitasAvatar(
-                                      initials: widget.initialProfile['initials']?.toString() ?? _initials(),
+                                      initials: displayInitials,
                                       color: brandNavy,
                                       size: 76,
                                     ),
@@ -212,7 +244,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 )
                               else
                                 UnitasAvatar(
-                                  initials: widget.initialProfile['initials']?.toString() ?? _initials(),
+                                  initials: displayInitials,
                                   color: brandNavy,
                                   size: 76,
                                 ),

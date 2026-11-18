@@ -83,22 +83,33 @@ class _ImageCropDialogState extends State<_ImageCropDialog> {
   }
 
   Future<void> _confirmCrop() async {
+    if (_saving) return;
     setState(() => _saving = true);
+    ui.Image? image;
+    var popped = false;
     try {
       final boundary = _cropKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) {
-        if (mounted) Navigator.pop(context, widget.imageBytes);
+        if (mounted) {
+          popped = true;
+          Navigator.pop(context, widget.imageBytes);
+        }
         return;
       }
-      final image = await boundary.toImage(pixelRatio: 2.5);
+      image = await boundary.toImage(pixelRatio: 2.5);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (mounted) {
+        popped = true;
         Navigator.pop(context, byteData?.buffer.asUint8List() ?? widget.imageBytes);
       }
     } catch (_) {
-      if (mounted) Navigator.pop(context, widget.imageBytes);
+      if (mounted) {
+        popped = true;
+        Navigator.pop(context, widget.imageBytes);
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      image?.dispose();
+      if (!popped && mounted) setState(() => _saving = false);
     }
   }
 
@@ -140,10 +151,12 @@ class _ImageCropDialogState extends State<_ImageCropDialog> {
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: InkWell(
-                        onTap: () {
-                          setState(() => _aspectRatio = ratioVal);
-                          _resetTransform();
-                        },
+                        onTap: _saving
+                            ? null
+                            : () {
+                                setState(() => _aspectRatio = ratioVal);
+                                _resetTransform();
+                              },
                         borderRadius: BorderRadius.circular(8),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -153,7 +166,7 @@ class _ImageCropDialogState extends State<_ImageCropDialog> {
                             border: Border.all(color: selected ? brandNavy : borderColor),
                           ),
                           child: Text(
-                            r['label'] as String,
+                            (r['label'] ?? '').toString(),
                             style: caption.copyWith(
                               color: selected ? Colors.white : dim1,
                               fontWeight: FontWeight.w600,
@@ -192,6 +205,9 @@ class _ImageCropDialogState extends State<_ImageCropDialog> {
                                 image: _memoryImage,
                                 fit: BoxFit.cover,
                                 gaplessPlayback: true,
+                                errorBuilder: (_, _, _) => const Center(
+                                  child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 40),
+                                ),
                               ),
                             ),
                           ),
@@ -226,7 +242,7 @@ class _ImageCropDialogState extends State<_ImageCropDialog> {
                   Icon(Icons.zoom_in, size: 18, color: dim1),
                   const SizedBox(width: 4),
                   TextButton(
-                    onPressed: _resetTransform,
+                    onPressed: _saving ? null : _resetTransform,
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       minimumSize: Size.zero,
