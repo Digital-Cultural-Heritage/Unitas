@@ -321,18 +321,29 @@ describe("Unitas Backend API", () => {
   });
 
   it("Protected endpoints reject unauthenticated requests with 401", async () => {
-    const [meRes, postsRes, notifRes, msgRes, jobsRes] = await Promise.all([
+    const sampleId = "11111111-1111-4111-8111-111111111111";
+    const [meRes, postsRes, notifRes, msgRes, jobsRes, appliedRes, applyRes, applicantsRes, statusRes, cvRes] = await Promise.all([
       request("GET", "/api/auth/me"),
       request("POST", "/api/posts", { content: "Halo" }),
       request("GET", "/api/notifications"),
       request("GET", "/api/messages/conversations"),
       request("GET", "/api/jobs/my-jobs/all"),
+      request("GET", "/api/jobs/applied"),
+      request("POST", `/api/jobs/${sampleId}/apply`, { cv_url: "https://example.com/cv.pdf" }),
+      request("GET", `/api/jobs/${sampleId}/applicants`),
+      request("PUT", `/api/jobs/applications/${sampleId}/status`, { status: "reviewed" }),
+      request("POST", "/api/upload/cv", {}),
     ]);
     assert.equal(meRes.status, 401);
     assert.equal(postsRes.status, 401);
     assert.equal(notifRes.status, 401);
     assert.equal(msgRes.status, 401);
     assert.equal(jobsRes.status, 401);
+    assert.equal(appliedRes.status, 401);
+    assert.equal(applyRes.status, 401);
+    assert.equal(applicantsRes.status, 401);
+    assert.equal(statusRes.status, 401);
+    assert.equal(cvRes.status, 401);
   });
 
   describe("JWT token separation", () => {

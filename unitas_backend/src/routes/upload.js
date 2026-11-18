@@ -2,10 +2,13 @@ const express = require("express");
 const multer = require("multer");
 const sharp = require("sharp");
 const crypto = require("crypto");
+const { PDFDocument } = require("pdf-lib");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
+
+const MAX_CV_FINAL_BYTES = 1024 * 1024; // 1 MB
 
 const ALLOWED_MIMES = new Set([
   "image/jpeg",
@@ -20,7 +23,7 @@ const ALLOWED_MIMES = new Set([
 const ALLOWED_SHARP_FORMATS = new Set(["jpeg", "png", "webp", "gif", "heif"]);
 const SHARP_OPTS = { limitInputPixels: 25_000_000 }; // guard against pixel-bomb DoS
 
-// Multer: simpan di memory (bukan disk), cek tipe file
+// Multer: simpan gambar di memory (bukan disk), cek tipe file
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // max 10 MB input, 1 file
@@ -48,6 +51,35 @@ function handleUpload(req, res, next) {
   });
 }
 
+// Multer: input PDF CV hingga 4 MB (batas aman payload Vercel) sebelum dikompresi ke <= 1 MB
+const uploadPdf = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024, files: 1 },
+  fileFilter(req, file, cb) {
+    const isPdfMime = file.mimetype === "application/pdf";
+    const isPdfName = (file.originalname || "").toLowerCase().endsWith(".pdf");
+    if (isPdfMime || isPdfName) {
+      cb(null, true);
+    } else {
+      const err = new Error("Format CV harus berupa file PDF.");
+      err.status = 400;
+      cb(err);
+    }
+  },
+});
+
+function handleMulter(middleware) {
+  return (req, res, next) => {
+    middleware(req, res, (err) => {
+      if (!err) return next();
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "Ukuran file input terlalu besar." });
+      }
+      return res.status(err.status || 400).json({ error: err.message || "Gagal memproses file." });
+    });
+  };
+}
+
 async function sanitizeImage(buffer, transformFn) {
   let meta;
   try {
@@ -70,6 +102,36 @@ async function sanitizeImage(buffer, transformFn) {
     err.status = 400;
     throw err;
   }
+}
+
+async function compressPdfBuffer(inputBuffer) {
+  let finalBuffer = inputBuffer;
+  try {
+    const pdfDoc = await PDFDocument.load(inputBuffer, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+    pdfDoc.setTitle("");
+    pdfDoc.setAuthor("");
+    pdfDoc.setSubject("");
+    pdfDoc.setKeywords([]);
+    pdfDoc.setProducer("");
+    pdfDoc.setCreator("");
+
+    const savedBytes = await pdfDoc.save({
+      useObjectStreams: true,
+      addDefaultPage: false,
+      objectsPerTick: 50,
+    });
+    const compressedBuffer = Buffer.from(savedBytes);
+    if (compressedBuffer.length < inputBuffer.length) {
+      finalBuffer = compressedBuffer;
+    }
+  } catch (e) {
+    // Jika struktur PDF terenkripsi/khusus gagal di-repack, pakai buffer asli bila lolos batas ukuran
+    console.warn("[CV Compress] Fallback original PDF:", e.message);
+  }
+  return finalBuffer;
 }
 
 // ── POST /api/upload/avatar ───────────────────────────────────────────────
@@ -131,6 +193,44 @@ router.post("/post", requireAuth, handleUpload, async (req, res, next) => {
 
     const { data: urlData } = supabase.storage.from("post-images").getPublicUrl(fileName);
     res.json({ url: urlData.publicUrl });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/upload/cv — Kompres PDF & maksimal 1 MB ─────────────────────
+router.post("/cv", requireAuth, handleMulter(uploadPdf.single("file")), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "File CV PDF wajib diunggah" });
+
+    const header = req.file.buffer.subarray(0, 5).toString("latin1");
+    if (header !== "%PDF-") {
+      return res.status(400).json({ error: "File bukan PDF yang valid." });
+    }
+
+    const finalBuffer = await compressPdfBuffer(req.file.buffer);
+    if (finalBuffer.length > MAX_CV_FINAL_BYTES) {
+      const sizeKb = Math.ceil(finalBuffer.length / 1024);
+      return res.status(400).json({
+        error: `Ukuran PDF setelah kompresi (${sizeKb} KB) masih melebihi batas maksimal 1 MB (1024 KB).`,
+      });
+    }
+
+    const filePath = `${req.user.userId}/${crypto.randomUUID()}.pdf`;
+    const { error: uploadErr } = await supabase.storage
+      .from("cvs")
+      .upload(filePath, finalBuffer, {
+        contentType: "application/pdf",
+        upsert: false,
+      });
+    if (uploadErr) throw uploadErr;
+
+    const { data: urlData } = supabase.storage.from("cvs").getPublicUrl(filePath);
+    res.json({
+      url: urlData.publicUrl,
+      size_bytes: finalBuffer.length,
+      original_bytes: req.file.buffer.length,
+    });
   } catch (err) {
     next(err);
   }

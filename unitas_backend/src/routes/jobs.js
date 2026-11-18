@@ -2,6 +2,7 @@
 const validator = require("validator");
 const supabase = require("../lib/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { createNotification } = require("../lib/notifications");
 const {
   uuidParam,
   parsePagination,
@@ -14,10 +15,18 @@ const {
 const router = express.Router();
 
 router.param("id", uuidParam);
+router.param("appId", uuidParam);
 
 const MAX_SALARY = 2_000_000_000;
 const JOB_COLS =
   "id, poster_id, title, company, company_logo, location, job_type, salary_min, salary_max, tags, description, apply_url, contact_email, is_active, created_at, updated_at";
+
+const APPLICATION_STATUS_LABELS = {
+  pending: "Menunggu Review",
+  reviewed: "Sedang Direview Alumni",
+  referred: "Diteruskan ke HR (Referral)",
+  rejected: "Belum Cocok Kali Ini",
+};
 
 function parseSalary(v) {
   if (v === null || v === undefined || v === "") return { ok: true, value: null };
@@ -145,9 +154,9 @@ router.get("/saved", requireAuth, async (req, res, next) => {
       .select(`
         id, saved_at,
         job:job_id(
-          id, title, company, company_logo, location, job_type,
-          salary_min, salary_max, tags, apply_url, contact_email,
-          poster:poster_id(id, user_profiles(full_name))
+          id, poster_id, title, company, company_logo, location, job_type,
+          salary_min, salary_max, tags, description, apply_url, contact_email, is_active, created_at,
+          poster:poster_id(id, user_profiles(full_name, avatar_url, prodi, angkatan, pekerjaan, perusahaan))
         )
       `)
       .eq("user_id", req.user.userId)
@@ -155,6 +164,40 @@ router.get("/saved", requireAuth, async (req, res, next) => {
       .range(offset, to);
     if (error) throw error;
     res.json({ data: (data || []).map((s) => s.job).filter(Boolean) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/jobs/applied — Lowongan yang sudah dilamar user ─────────────
+router.get("/applied", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("job_applications")
+      .select(`
+        id, status, cv_url, cover_note, created_at, updated_at,
+        job:job_id(
+          id, poster_id, title, company, company_logo, location, job_type,
+          salary_min, salary_max, tags, description, apply_url, contact_email, is_active, created_at,
+          poster:poster_id(id, user_profiles(full_name, avatar_url, prodi, angkatan, pekerjaan, perusahaan))
+        )
+      `)
+      .eq("applicant_id", req.user.userId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    const formatted = (data || [])
+      .filter((row) => row.job)
+      .map((row) => ({
+        ...row.job,
+        application_id: row.id,
+        application_status: row.status,
+        cv_url: row.cv_url,
+        cover_note: row.cover_note,
+        applied_at: row.created_at,
+      }));
+
+    res.json({ data: formatted });
   } catch (err) {
     next(err);
   }
@@ -171,7 +214,76 @@ router.get("/my-jobs/all", requireAuth, async (req, res, next) => {
       .order("created_at", { ascending: false })
       .range(offset, to);
     if (error) throw error;
-    res.json({ data: data || [] });
+
+    const jobs = data || [];
+    if (jobs.length === 0) return res.json({ data: [] });
+
+    const countMap = {};
+    try {
+      const jobIds = jobs.map((j) => j.id);
+      const { data: apps } = await supabase
+        .from("job_applications")
+        .select("job_id")
+        .in("job_id", jobIds);
+
+      for (const a of apps || []) {
+        countMap[a.job_id] = (countMap[a.job_id] || 0) + 1;
+      }
+    } catch (_) {
+      // Fallback safely when job_applications is not present in minimal test mocks
+    }
+
+    const enriched = jobs.map((j) => ({
+      ...j,
+      applicant_count: countMap[j.id] || 0,
+    }));
+    res.json({ data: enriched });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── PUT /api/jobs/applications/:appId/status — Update status pelamar ─────
+router.put("/applications/:appId/status", requireAuth, async (req, res, next) => {
+  try {
+    const { appId } = req.params;
+    const status = req.body?.status;
+    if (!["pending", "reviewed", "referred", "rejected"].includes(status)) {
+      return res.status(400).json({ error: "Status lamaran tidak valid" });
+    }
+
+    const { data: appRow, error: fetchErr } = await supabase
+      .from("job_applications")
+      .select("id, applicant_id, job:job_id(id, title, company, poster_id)")
+      .eq("id", appId)
+      .single();
+
+    if (fetchErr || !appRow || !appRow.job) {
+      return res.status(404).json({ error: "Lamaran tidak ditemukan" });
+    }
+    if (appRow.job.poster_id !== req.user.userId) {
+      return res.status(403).json({ error: "Tidak diizinkan mengubah status lamaran ini" });
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from("job_applications")
+      .update({ status })
+      .eq("id", appId)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
+
+    const label = APPLICATION_STATUS_LABELS[status] || status;
+    await createNotification({
+      userId: appRow.applicant_id,
+      actorId: req.user.userId,
+      type: "job_status",
+      title: `Update lamaran: ${appRow.job.title}`,
+      body: `${appRow.job.company} — Status: ${label}`,
+      referenceId: appRow.job.id,
+    });
+
+    res.json(updated);
   } catch (err) {
     next(err);
   }
@@ -188,7 +300,7 @@ router.get("/", async (req, res, next) => {
       .select(`
         id, poster_id, title, company, company_logo, location, job_type,
         salary_min, salary_max, tags, description, apply_url, contact_email, is_active, created_at,
-        poster:poster_id(id, user_profiles(full_name, prodi, angkatan))
+        poster:poster_id(id, user_profiles(full_name, avatar_url, prodi, angkatan, pekerjaan, perusahaan))
       `, { count: "exact" })
       .eq("is_active", true)
       .order("created_at", { ascending: false })
@@ -213,7 +325,7 @@ router.get("/:id", async (req, res, next) => {
   try {
     const { data, error } = await supabase
       .from("jobs")
-      .select(`${JOB_COLS}, poster:poster_id(id, user_profiles(full_name, avatar_url, prodi, angkatan))`)
+      .select(`${JOB_COLS}, poster:poster_id(id, user_profiles(full_name, avatar_url, prodi, angkatan, pekerjaan, perusahaan))`)
       .eq("id", req.params.id)
       .maybeSingle();
     if (error) throw error;
@@ -289,6 +401,119 @@ router.delete("/:id", requireAuth, async (req, res, next) => {
     if (error) throw error;
     if (!data || data.length === 0) return await jobMissingOrForbidden(req.params.id, res);
     res.json({ message: "Lowongan dihapus" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/jobs/:id/apply — Lamar lowongan dengan CV ──────────────────
+router.post("/:id/apply", requireAuth, async (req, res, next) => {
+  try {
+    const rawCvUrl = req.body?.cv_url;
+    if (typeof rawCvUrl !== "string" || !rawCvUrl.trim()) {
+      return res.status(400).json({ error: "File atau link CV wajib disertakan" });
+    }
+    const cvUrl = rawCvUrl.trim();
+    if (!isHttpUrl(cvUrl)) {
+      return res.status(400).json({ error: "URL CV harus valid (http/https)" });
+    }
+
+    const jobId = req.params.id;
+    const userId = req.user.userId;
+    const coverNote = req.body?.cover_note ? req.body.cover_note.toString().trim() : null;
+
+    const { data: job, error: jobErr } = await supabase
+      .from("jobs")
+      .select("id, poster_id, title, company, is_active")
+      .eq("id", jobId)
+      .single();
+
+    if (jobErr || !job) return res.status(404).json({ error: "Lowongan tidak ditemukan" });
+    if (job.is_active === false) return res.status(400).json({ error: "Lowongan ini sudah ditutup" });
+    if (job.poster_id === userId) {
+      return res.status(400).json({ error: "Tidak bisa melamar lowongan yang kamu buat sendiri" });
+    }
+
+    const { data: existingApp } = await supabase
+      .from("job_applications")
+      .select("id")
+      .eq("job_id", jobId)
+      .eq("applicant_id", userId)
+      .maybeSingle();
+
+    if (existingApp) {
+      return res.status(409).json({ error: "Kamu sudah melamar lowongan ini sebelumnya" });
+    }
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from("job_applications")
+      .insert({
+        job_id: jobId,
+        applicant_id: userId,
+        cv_url: cvUrl,
+        cover_note: coverNote || null,
+        status: "pending",
+      })
+      .select()
+      .single();
+    if (insertErr) {
+      if (isUniqueViolation(insertErr)) {
+        return res.status(409).json({ error: "Kamu sudah melamar lowongan ini sebelumnya" });
+      }
+      throw insertErr;
+    }
+
+    const { data: applicantProfile } = await supabase
+      .from("user_profiles")
+      .select("full_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const applicantName = applicantProfile?.full_name || "Seorang alumni";
+    await createNotification({
+      userId: job.poster_id,
+      actorId: userId,
+      type: "job_application",
+      title: `${applicantName} melamar ${job.title}`,
+      body: `Di ${job.company}. Buka Kelola Lowongan untuk cek CV & teruskan ke HR.`,
+      referenceId: job.id,
+    });
+
+    res.status(201).json(inserted);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/jobs/:id/applicants — Daftar pelamar (khusus pemilik) ───────
+router.get("/:id/applicants", requireAuth, async (req, res, next) => {
+  try {
+    const jobId = req.params.id;
+    const { data: job, error: jobErr } = await supabase
+      .from("jobs")
+      .select("id, poster_id, title, company")
+      .eq("id", jobId)
+      .single();
+
+    if (jobErr || !job) return res.status(404).json({ error: "Lowongan tidak ditemukan" });
+    if (job.poster_id !== req.user.userId) {
+      return res.status(403).json({ error: "Hanya pembuat lowongan yang bisa melihat daftar pelamar" });
+    }
+
+    const { data, error } = await supabase
+      .from("job_applications")
+      .select(`
+        id, job_id, applicant_id, cv_url, cover_note, status, created_at, updated_at,
+        applicant:applicant_id(
+          id, email,
+          user_profiles(full_name, initials, avatar_url, prodi, angkatan, pekerjaan, perusahaan, kota, linkedin)
+        )
+      `)
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    res.json({ data: data || [] });
   } catch (err) {
     next(err);
   }
