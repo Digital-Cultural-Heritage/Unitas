@@ -210,12 +210,14 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(22, 14, 22, MediaQuery.of(ctx).viewInsets.bottom + 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Center(
               child: Container(
                 width: 40,
@@ -360,6 +362,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
               ),
             ],
           ],
+          ),
         ),
       ),
     );
@@ -474,7 +477,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   // Header
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('${_alumni.isNotEmpty ? _alumni.length.toString() : "—"} alumni ditemukan', style: caption),
                       Text('Direktori Alumni', style: heading),

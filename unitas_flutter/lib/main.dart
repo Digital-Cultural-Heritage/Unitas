@@ -90,8 +90,9 @@ class _SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: brandBg,
-      body: Center(
-        child: Column(
+      body: SafeArea(
+        child: Center(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
@@ -139,6 +140,7 @@ class _SplashScreen extends StatelessWidget {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -172,26 +174,46 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final mqPadding = MediaQuery.paddingOf(context);
+    final rawTop = mqPadding.top;
+    // Pangkas margin bawah berlebih pada inset notch/Dynamic Island agar jarak status bar lebih rapat
+    final topInset = rawTop >= 54
+        ? rawTop - 10.0
+        : (rawTop >= 44 ? rawTop - 8.0 : rawTop);
+
     return Scaffold(
       backgroundColor: brandBg,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          HomeScreen(
-            refreshTrigger: _homeRefreshTick,
-            onOpenDirectory: () => setState(() {
-              _directoryRefreshTick++;
-              _currentIndex = 1;
-            }),
-            onOpenEvents: () => setState(() => _currentIndex = 2),
-            onOpenJobs: () => setState(() => _currentIndex = 3),
-            onOpenProfile: () => setState(() => _currentIndex = 4),
+      body: Padding(
+        padding: EdgeInsets.only(
+          top: topInset,
+          left: mqPadding.left,
+          right: mqPadding.right,
+        ),
+        child: MediaQuery.removePadding(
+          context: context,
+          removeTop: true,
+          removeLeft: true,
+          removeRight: true,
+          child: IndexedStack(
+            index: _currentIndex,
+            children: [
+              HomeScreen(
+                refreshTrigger: _homeRefreshTick,
+                onOpenDirectory: () => setState(() {
+                  _directoryRefreshTick++;
+                  _currentIndex = 1;
+                }),
+                onOpenEvents: () => setState(() => _currentIndex = 2),
+                onOpenJobs: () => setState(() => _currentIndex = 3),
+                onOpenProfile: () => setState(() => _currentIndex = 4),
+              ),
+              DirectoryScreen(refreshTrigger: _directoryRefreshTick),
+              _eventsScreen,
+              _jobsScreen,
+              _profileScreen,
+            ],
           ),
-          DirectoryScreen(refreshTrigger: _directoryRefreshTick),
-          _eventsScreen,
-          _jobsScreen,
-          _profileScreen,
-        ],
+        ),
       ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(

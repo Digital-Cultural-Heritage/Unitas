@@ -225,20 +225,24 @@ class _JobsScreenState extends State<JobsScreen> {
                   children: [
                     // Header
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 12, 22, 14),
+                      padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Eksklusif untuk Alumni',
-                                style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
-                              ),
-                              Text('Bursa Karier', style: heading),
-                            ],
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Eksklusif untuk Alumni',
+                                  style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text('Bursa Karier', style: heading, overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
                           ),
+                          const SizedBox(width: 8),
                           Row(
                             children: [
                               InkWell(
@@ -579,7 +583,14 @@ class _JobsScreenState extends State<JobsScreen> {
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Text(_timeAgo(job['created_at']), style: caption.copyWith(color: dim2)),
+                                        Expanded(
+                                          child: Text(
+                                            _timeAgo(job['created_at']),
+                                            style: caption.copyWith(color: dim2),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
                                         ElevatedButton(
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: brandNavy,

@@ -626,7 +626,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = _me?['full_name'] ?? 'Alumni';
     final initials = _meInitials();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
       child: Row(
         children: [
           Container(

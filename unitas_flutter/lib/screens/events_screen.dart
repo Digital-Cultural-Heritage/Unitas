@@ -155,30 +155,37 @@ class _EventsScreenState extends State<EventsScreen> {
           icon: const Icon(Icons.add),
           label: const Text('Buat Acara', style: TextStyle(fontWeight: FontWeight.w600)),
         ),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: Column(
-              children: [
-                const TabBar(
-                  labelColor: brandNavy,
-                  unselectedLabelColor: dim2,
-                  indicatorColor: brandNavy,
-                  indicatorWeight: 3,
-                  tabs: [
-                    Tab(text: 'Semua Acara'),
-                    Tab(text: 'Acara Saya'),
-                  ],
-                ),
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      _buildAllEvents(),
-                      _buildMyEvents(),
-                    ],
+        body: SafeArea(
+          bottom: false,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: Column(
+                children: [
+                  const SizedBox(
+                    height: 34,
+                    child: TabBar(
+                      labelColor: brandNavy,
+                      unselectedLabelColor: dim2,
+                      indicatorColor: brandNavy,
+                      indicatorWeight: 3,
+                      labelPadding: EdgeInsets.zero,
+                      tabs: [
+                        Tab(height: 34, text: 'Semua Acara'),
+                        Tab(height: 34, text: 'Acara Saya'),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        _buildAllEvents(),
+                        _buildMyEvents(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -366,17 +373,20 @@ class _EventsScreenState extends State<EventsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(22, 18, 22, 14),
+              padding: const EdgeInsets.fromLTRB(22, 10, 22, 14),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('${list.length} acara aktif', style: caption),
-                      Text('Acara & Kegiatan', style: heading),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${list.length} acara aktif', style: caption),
+                        Text('Acara & Kegiatan', style: heading, overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
@@ -652,17 +662,20 @@ class _EventsScreenState extends State<EventsScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    RichText(
-                                      text: TextSpan(
-                                        children: [
-                                          TextSpan(
-                                            text: '${ev['attendee_count'] ?? 0}',
-                                            style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
-                                          ),
-                                          TextSpan(text: ' akan hadir', style: caption),
-                                        ],
+                                    Expanded(
+                                      child: RichText(
+                                        text: TextSpan(
+                                          children: [
+                                            TextSpan(
+                                              text: '${ev['attendee_count'] ?? 0}',
+                                              style: caption.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+                                            ),
+                                            TextSpan(text: ' akan hadir', style: caption),
+                                          ],
+                                        ),
                                       ),
                                     ),
+                                    const SizedBox(width: 8),
                                     InkWell(
                                       onTap: () => _toggleReg(id),
                                       borderRadius: BorderRadius.circular(8),
