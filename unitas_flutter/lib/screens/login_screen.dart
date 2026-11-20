@@ -249,6 +249,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       validator: (v) => validateAuthPassword(v),
                     ),
+                    const SizedBox(height: 6),
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -311,36 +312,38 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 20),
 
                     // Register link
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 4,
-                      children: [
-                        Text(
-                          'Belum punya akun?',
-                          style: body.copyWith(color: dim2),
-                        ),
-                        GestureDetector(
-                          onTap: _busy
-                              ? null
-                              : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => RegisterScreen(
-                                        onRegisterSuccess:
-                                            widget.onLoginSuccess,
+                    Center(
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 4,
+                        children: [
+                          Text(
+                            'Belum punya akun?',
+                            style: body.copyWith(color: dim2),
+                          ),
+                          GestureDetector(
+                            onTap: _busy
+                                ? null
+                                : () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => RegisterScreen(
+                                          onRegisterSuccess:
+                                              widget.onLoginSuccess,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                          child: Text(
-                            'Daftar sekarang',
-                            style: body.copyWith(
-                              color: brandNavy,
-                              fontWeight: FontWeight.w600,
+                            child: Text(
+                              'Daftar sekarang',
+                              style: body.copyWith(
+                                color: brandNavy,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),

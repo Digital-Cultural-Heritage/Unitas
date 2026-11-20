@@ -4,9 +4,11 @@ import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/users_service.dart';
 import '../core/api/auth_service.dart';
+import '../core/api/posts_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import 'edit_profile_screen.dart';
+import 'post_detail_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback onLogout;
@@ -25,8 +27,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Color(0xFF6A1B9A),
   ];
 
-  String _tab = 'tentang';
+  String _tab = 'postingan';
   Map<String, dynamic>? _profile;
+  List<Map<String, dynamic>> _posts = [];
   List<Map<String, dynamic>> _connections = [];
   List<Map<String, dynamic>> _requests = [];
   final Set<String> _responding = {};
@@ -74,9 +77,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         UsersService.getMyConnections().catchError((_) => <Map<String, dynamic>>[]),
         UsersService.getIncomingRequests().catchError((_) => <Map<String, dynamic>>[]),
       ]);
+      final profile = results[0] as Map<String, dynamic>?;
+      final userId = (profile?['id'] ?? '').toString();
+      final posts = userId.isNotEmpty
+          ? await PostsService.getUserPosts(userId)
+              .catchError((_) => <Map<String, dynamic>>[])
+          : <Map<String, dynamic>>[];
       if (mounted) {
         setState(() {
-          _profile = results[0] as Map<String, dynamic>?;
+          _profile = profile;
+          _posts = posts;
           _connections = results[1] as List<Map<String, dynamic>>;
           _requests = results[2] as List<Map<String, dynamic>>;
           _error = null;
@@ -267,17 +277,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   right: 14,
                                   child: SafeArea(
                                     bottom: false,
-                                    child: InkWell(
-                                      onTap: _openEditProfile,
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.35),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        InkWell(
+                                          onTap: _openEditProfile,
                                           borderRadius: BorderRadius.circular(20),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.35),
+                                              borderRadius: BorderRadius.circular(20),
+                                            ),
+                                            child: const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 16),
+                                          ),
                                         ),
-                                        child: const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 16),
-                                      ),
+                                        const SizedBox(width: 8),
+                                        InkWell(
+                                          onTap: _openSettingsSheet,
+                                          borderRadius: BorderRadius.circular(20),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.35),
+                                              borderRadius: BorderRadius.circular(20),
+                                            ),
+                                            child: const Icon(Icons.settings_outlined, color: Colors.white, size: 16),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -445,8 +473,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       _buildProfileCompletionBanner(),
                                       const SizedBox(height: 20),
                                       // Tabs
-                                      Row(children: ['tentang', 'koneksi', 'pengaturan'].map((t) =>
-                                        Expanded(child: GestureDetector(
+                                      Row(children: ['postingan', 'tentang', 'koneksi'].map((t) {
+                                        final badge = t == 'postingan' && _posts.isNotEmpty
+                                            ? ' (${_posts.length})'
+                                            : (t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : '');
+                                        return Expanded(child: GestureDetector(
                                           onTap: () => setState(() => _tab = t),
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -456,7 +487,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                               )),
                                             ),
                                             child: Text(
-                                              '${t[0].toUpperCase()}${t.substring(1)}${t == 'koneksi' && _requests.isNotEmpty ? ' (${_requests.length})' : ''}',
+                                              '${t[0].toUpperCase()}${t.substring(1)}$badge',
                                               style: caption.copyWith(
                                                 color: _tab == t ? brandNavy : dim2,
                                                 fontWeight: _tab == t ? FontWeight.w600 : FontWeight.w400,
@@ -464,8 +495,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                               textAlign: TextAlign.center,
                                             ),
                                           ),
-                                        )),
-                                      ).toList()),
+                                        ));
+                                      }).toList()),
                                       const SizedBox(height: 20),
                                     ],
                                   ),
@@ -484,6 +515,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   List<Widget> _buildTabSlivers() {
+    if (_tab == 'postingan') {
+      return _buildPostinganSlivers();
+    }
     if (_tab == 'tentang') {
       return [
         SliverPadding(
@@ -492,15 +526,220 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ];
     }
-    if (_tab == 'koneksi') {
-      return _buildKoneksiSlivers();
+    return _buildKoneksiSlivers();
+  }
+
+  void _openSettingsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.72,
+        minChildSize: 0.45,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (_, scrollController) => Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: borderColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 8),
+              child: Row(
+                children: [
+                  Text('Pengaturan', style: heading.copyWith(fontSize: 17)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20, color: dim2),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: borderColor),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.fromLTRB(22, 16, 22, 28),
+                child: _buildPengaturan(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildPostinganSlivers() {
+    if (_posts.isEmpty) {
+      return [
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          sliver: SliverToBoxAdapter(
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+              decoration: BoxDecoration(
+                color: card,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: borderColor),
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.article_outlined, size: 32, color: dim2.withValues(alpha: 0.7)),
+                  const SizedBox(height: 10),
+                  Text('Belum ada postingan', style: subTitle),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Postingan yang kamu bagikan di Beranda akan muncul di sini.',
+                    style: caption.copyWith(color: dim2),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ];
     }
+
     return [
       SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 22),
-        sliver: SliverToBoxAdapter(child: _buildPengaturan()),
+        sliver: SliverList.separated(
+          itemCount: _posts.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
+          itemBuilder: (_, index) => _buildPostCard(_posts[index]),
+        ),
       ),
     ];
+  }
+
+  Widget _buildPostCard(Map<String, dynamic> post) {
+    final postId = post['id']?.toString() ?? '';
+    final content = (post['content'] ?? '').toString().trim();
+    final imageUrl = (post['image_url'] ?? '').toString().trim();
+    final likesCount = post['likes_count'] ?? 0;
+    final commentsCount = post['comments_count'] ?? 0;
+    final createdAt = _timeAgo(post['created_at']?.toString());
+    final name = (_profile?['full_name'] ?? 'Pengguna').toString().trim();
+    final avatarUrl = (_profile?['avatar_url'] ?? '').toString().trim();
+
+    return Material(
+      color: card,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PostDetailScreen(
+                post: post,
+                onPostDeleted: () {
+                  if (mounted && postId.isNotEmpty) {
+                    setState(() {
+                      _posts.removeWhere((p) => p['id']?.toString() == postId);
+                    });
+                  }
+                },
+              ),
+            ),
+          );
+          if (mounted) _load();
+        },
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  UnitasAvatar(
+                    initials: _initials(_profile),
+                    color: _colorFor(_profile?['id'] ?? name),
+                    size: 34,
+                    avatarUrl: avatarUrl,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: subTitle.copyWith(fontSize: 13.5)),
+                        if (createdAt.isNotEmpty)
+                          Text(createdAt, style: caption.copyWith(color: dim2, fontSize: 11.5)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, size: 18, color: dim2),
+                ],
+              ),
+              if (content.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  content,
+                  style: body.copyWith(height: 1.45),
+                  maxLines: 5,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              if (imageUrl.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(
+                    imageUrl,
+                    width: double.infinity,
+                    height: 180,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(Icons.favorite_border, size: 16, color: dim2),
+                  const SizedBox(width: 4),
+                  Text('$likesCount', style: caption.copyWith(color: dim2)),
+                  const SizedBox(width: 16),
+                  Icon(Icons.chat_bubble_outline, size: 15, color: dim2),
+                  const SizedBox(width: 4),
+                  Text('$commentsCount', style: caption.copyWith(color: dim2)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _timeAgo(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'Baru saja';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} mnt lalu';
+    if (diff.inHours < 24) return '${diff.inHours} jam lalu';
+    if (diff.inDays < 7) return '${diff.inDays} hari lalu';
+    return '${dt.day}/${dt.month}/${dt.year}';
   }
 
   Widget _buildProfileCompletionBanner() {

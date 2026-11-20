@@ -48,13 +48,23 @@ async function postMissingOrForbidden(postId, res) {
 router.get("/", async (req, res, next) => {
   try {
     const { page, limit, offset, to } = parsePagination(req.query);
+    const userId = typeof req.query.user_id === "string" ? req.query.user_id.trim() : "";
+    if (userId && !isUuid(userId)) {
+      return res.status(400).json({ error: "user_id tidak valid" });
+    }
 
-    const { data, count, error } = await supabase
+    let query = supabase
       .from("posts")
       .select(`
         id, content, image_url, likes_count, comments_count, created_at,
         user:user_id(id, user_profiles(full_name, initials, avatar_url, prodi, angkatan))
-      `, { count: "exact" })
+      `, { count: "exact" });
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, count, error } = await query
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(offset, to);

@@ -8,6 +8,22 @@ class PostsService {
     return asJsonMapList(res);
   }
 
+  static Future<List<Map<String, dynamic>>> getUserPosts(
+    String userId, {
+    int page = 1,
+  }) async {
+    final res = await ApiClient.get(
+      '/api/posts?user_id=$userId&page=$page&limit=20',
+      auth: false,
+    );
+    final list = asJsonMapList(res);
+    return list.where((p) {
+      final user = p['user'] is Map ? p['user'] as Map : const {};
+      final uid = (user['id'] ?? p['user_id'] ?? '').toString();
+      return uid == userId;
+    }).toList();
+  }
+
   // ── Create post ────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> createPost(
     String content, {

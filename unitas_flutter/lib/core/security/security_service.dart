@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// SecurityService — Dart-side wrapper untuk MethodChannel "com.unitas/security".
@@ -21,7 +21,7 @@ class SecurityService {
   /// Cek apakah perangkat di-root. Hanya berjalan di Android.
   /// Di platform lain (iOS, Web) selalu mengembalikan false.
   static Future<bool> isRooted() async {
-    if (!Platform.isAndroid) return false;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
     try {
       final result = await _channel.invokeMethod<bool>('isRooted');
       return result ?? false;
@@ -34,7 +34,7 @@ class SecurityService {
   /// Inisialisasi anti-debug (dipanggil dari native di onCreate, tapi
   /// method ini bisa dipakai untuk trigger ulang jika diperlukan).
   static Future<void> initAntiDebug() async {
-    if (!Platform.isAndroid) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     try {
       await _channel.invokeMethod<void>('initAntiDebug');
     } on PlatformException {

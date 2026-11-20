@@ -157,7 +157,7 @@ class GoogleContinueButton extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        'Continue with Google',
+                        'Lanjutkan dengan Google',
                         style: buttonStyle.copyWith(
                           color: brandNavy,
                           fontSize: 14.5,
@@ -169,7 +169,7 @@ class GoogleContinueButton extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Gunakan akun Google kampus (@unud.ac.id atau @student.unud.ac.id)',
+          'Gunakan akun Google kampus Unud',
           style: caption.copyWith(color: dim2, fontSize: 11.5),
           textAlign: TextAlign.center,
         ),
