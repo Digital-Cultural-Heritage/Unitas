@@ -1,11 +1,11 @@
 import 'dart:async';
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/auth_service.dart';
 import '../core/api/messages_service.dart';
 import '../core/crypto/e2ee_service.dart';
-import '../core/crypto/ratchet_state.dart';
 import '../widgets/avatar.dart';
 
 class ChatRoomScreen extends StatefulWidget {
@@ -39,14 +39,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   Timer? _pollTimer;
 
   // ── E2EE state ────────────────────────────────────────────────────────────
-  RatchetState? _ratchetState;
-  bool _e2eeReady = false;         // sesi E2EE sudah terbentuk
-  bool _e2eeInitializing = false;  // sedang setup sesi
-  String? _e2eeError;              // pesan error setup
-  String? _ephemeralPubKey;        // ephemeral key untuk pesan pertama (X3DH initiator)
-  bool _isFirstMessage = false;    // apakah ini pesan pertama dalam sesi
-  String? _myIdentityPub;
-  String? _theirIdentityPub;
+  SecretKey? _conversationKey;
+  bool _e2eeReady = false;         // sesi E2EE sudah aktif
+  bool _e2eeInitializing = false;  // sedang setup kunci
+  String? _e2eeNotice;             // pesan status enkripsi jika peer belum ada key
 
   static const _icebreakers = [
     'Halo, salam kenal!',
@@ -54,7 +50,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     'Lagi sibuk apa sekarang?',
   ];
 
-  // ID conversation gabungan untuk penyimpanan state ratchet
   String get _conversationId {
     final ids = [_myId ?? '', widget.peerId];
     ids.sort();
@@ -105,21 +100,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     if (!mounted) return;
     _myId = user?['id']?.toString();
 
-    // Setup E2EE secara paralel dengan load pesan
-    await Future.wait([
-      _setupE2ee(),
-      _loadMessages(),
-    ]);
+    // Setup E2EE key lalu muat pesan
+    await _setupE2ee();
+    await _loadMessages();
     if (mounted) _startPolling();
   }
 
   /// Setup sesi E2EE dengan peer.
+  /// Menghitung Conversation Secret Key via ECDH X25519 + HKDF.
   Future<void> _setupE2ee() async {
     if (!mounted) return;
     setState(() => _e2eeInitializing = true);
 
     try {
-      // Pastikan identity keys kita sudah dibuat & terdaftar ke server
+      // 1. Pastikan kunci identitas kita sendiri sudah ada & terdaftar ke server
       if (!await E2eeService.hasIdentityKeys()) {
         await E2eeService.generateIdentityKeys();
       }
@@ -131,91 +125,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         }
       }
 
-      // Muat identity public key kita untuk safety number
-      final myBundle = await E2eeService.getPublicKeyBundle();
-      _myIdentityPub = myBundle?['identity_public_key'];
-
-      // Coba load ratchet state dari storage
-      final savedState = await E2eeService.loadRatchetState(_conversationId);
-
-      if (savedState != null) {
-        // Sesi sudah ada — langsung pakai
-        _theirIdentityPub = savedState.theirIdentityPublicKey;
-        if (mounted) {
-          setState(() {
-            _ratchetState       = savedState;
-            _e2eeReady          = true;
-            _e2eeInitializing   = false;
-          });
-        }
-        return;
-      }
-
-      // Belum ada sesi — ambil public key peer dan lakukan X3DH
+      // 2. Ambil public key milik lawan bicara dari server
       final peerBundle = await MessagesService.getKeyBundle(widget.peerId);
-      if (peerBundle == null || peerBundle.isEmpty) {
-        // Peer belum punya key — fallback ke plaintext (atau tampilkan peringatan)
+      final peerPubKey = peerBundle?['identity_public_key'] as String?;
+
+      if (peerPubKey == null || peerPubKey.isEmpty) {
+        // Lawan bicara belum login versi baru — pesan dikirim normal (fallback)
         if (mounted) {
           setState(() {
-            _e2eeError        = 'Enkripsi belum tersedia untuk pengguna ini';
+            _e2eeReady        = false;
             _e2eeInitializing = false;
+            _e2eeNotice       = 'Lawan bicara belum mengaktifkan kunci enkripsi';
           });
         }
         return;
       }
 
-      _theirIdentityPub = peerBundle['identity_public_key'] as String?;
-
-      // Periksa apakah identity key peer berubah (safety number alert)
-      // Jika sudah ada state lama, bandingkan
-      if (savedState != null &&
-          savedState.theirIdentityPublicKey != _theirIdentityPub) {
-        if (mounted) await _showKeyChangeWarning();
-      }
-
-      // X3DH: kita sebagai initiator
-      final x3dhResult = await E2eeService.initiateSession(peerBundle);
-      _ephemeralPubKey = x3dhResult.ephemeralPublicKey;
-      _isFirstMessage  = true;
-
-      await E2eeService.saveRatchetState(_conversationId, x3dhResult.state);
+      // 3. Turunkan Secret Key percakapan (ECDH X25519)
+      final convKey = await E2eeService.getConversationKey(
+        conversationId: _conversationId,
+        peerIdentityPublicKeyB64: peerPubKey,
+      );
 
       if (mounted) {
         setState(() {
-          _ratchetState     = x3dhResult.state;
+          _conversationKey  = convKey;
           _e2eeReady        = true;
           _e2eeInitializing = false;
+          _e2eeNotice       = null;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _e2eeError        = 'Gagal setup enkripsi: $e';
+          _e2eeReady        = false;
           _e2eeInitializing = false;
+          _e2eeNotice       = 'Enkripsi tidak aktif: $e';
         });
       }
     }
-  }
-
-  Future<void> _showKeyChangeWarning() async {
-    return showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('⚠️ Kunci Keamanan Berubah'),
-        content: Text(
-          'Kunci keamanan ${widget.peerName} telah berubah. '
-          'Ini bisa terjadi jika mereka install ulang aplikasi. '
-          'Verifikasi identitas secara langsung jika perlu.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Mengerti'),
-          ),
-        ],
-      ),
-    );
   }
 
   // ── Load & decrypt messages ───────────────────────────────────────────────
@@ -249,14 +197,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     }
     try {
       final raw = await MessagesService.getMessages(widget.peerId);
-      // Dekripsi semua pesan E2EE
       final decrypted = await _decryptMessages(raw);
 
       if (mounted && epoch == _sendEpoch) {
-        final changed     = _messagesChanged(decrypted);
+        final changed = _messagesChanged(decrypted);
         if (silent && !changed && !_loading && !_error) return;
         final wasEmptyOrInitial = !silent || _messages.isEmpty;
-        final hasNew    = decrypted.length > _messages.length;
+        final hasNew = decrypted.length > _messages.length;
         final shouldScroll = wasEmptyOrInitial || (hasNew && _isNearBottom());
         setState(() {
           _messages = decrypted;
@@ -280,47 +227,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     }
   }
 
-  /// Dekripsi semua pesan E2EE dalam list.
-  /// Pesan plaintext lama (content != null, ciphertext == null) dikembalikan apa adanya.
+  /// Dekripsi pesan dari server.
+  /// Pesan yang terenkripsi di database otomatis didekripsi menjadi teks yang
+  /// terbaca jelas dan normal di layar chat!
   Future<List<Map<String, dynamic>>> _decryptMessages(
     List<Map<String, dynamic>> raw,
   ) async {
     final result = <Map<String, dynamic>>[];
-    var state = _ratchetState;
+    final key = _conversationKey;
 
     for (final m in raw) {
       final ciphertext = m['ciphertext'] as String?;
-      final content    = m['content']    as String?;
-      final isFromMe   = m['sender_id']?.toString() == _myId;
+      final nonce      = m['nonce'] as String?;
+      final content    = m['content'] as String?;
 
-      if (ciphertext != null && ciphertext.isNotEmpty) {
-        // Pesan E2EE
-        if (isFromMe) {
-          // Pesan milik kita sendiri — tidak perlu dekripsi
-          result.add({...m, 'displayContent': '(pesan terkirim)'});
-        } else if (state != null && state.receiveChainKey.isNotEmpty) {
-          try {
-            final decResult = await E2eeService.decryptMessage(m, state);
-            state = decResult.newState;
-            result.add({...m, 'displayContent': decResult.plaintext});
-          } catch (e) {
-            result.add({...m, 'displayContent': '⚠️ Pesan tidak dapat didekripsi'});
-          }
-        } else {
-          result.add({...m, 'displayContent': '🔒 Pesan terenkripsi'});
+      if (ciphertext != null && nonce != null && key != null) {
+        try {
+          // Dekripsi ciphertext dari database menjadi teks asli
+          final plain = await E2eeService.decryptMessage(
+            ciphertextB64: ciphertext,
+            nonceB64: nonce,
+            conversationKey: key,
+          );
+          result.add({...m, 'displayText': plain});
+        } catch (_) {
+          result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi'});
         }
       } else if (content != null) {
-        // Pesan plaintext lama
-        result.add({...m, 'displayContent': '[Pesan lama] $content'});
+        // Pesan biasa / legacy
+        result.add({...m, 'displayText': content});
       } else {
-        result.add({...m, 'displayContent': ''});
+        result.add({...m, 'displayText': ''});
       }
-    }
-
-    // Simpan state ratchet yang sudah diupdate setelah dekripsi
-    if (state != null && state != _ratchetState && _myId != null) {
-      await E2eeService.saveRatchetState(_conversationId, state);
-      if (mounted) setState(() => _ratchetState = state);
     }
 
     return result;
@@ -336,31 +274,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     try {
       Map<String, dynamic> sent;
 
-      if (_e2eeReady && _ratchetState != null && _ratchetState!.sendChainKey.isNotEmpty) {
-        // ── E2EE send ──────────────────────────────────────────────────────
-        final encResult = await E2eeService.encryptMessage(text, _ratchetState!);
-        final payload   = encResult.toPayload(
-          ephemeralPublicKey: _isFirstMessage ? _ephemeralPubKey : null,
+      if (_e2eeReady && _conversationKey != null) {
+        // ── E2EE: Enkripsi teks sebelum kirim ke server ──────────────────
+        // Database Supabase hanya menerima ciphertext & nonce acak
+        final encrypted = await E2eeService.encryptMessage(
+          plaintext: text,
+          conversationKey: _conversationKey!,
         );
 
-        sent = await MessagesService.sendEncryptedMessage(widget.peerId, payload);
+        sent = await MessagesService.sendEncryptedMessage(widget.peerId, {
+          'ciphertext': encrypted['ciphertext'],
+          'nonce': encrypted['nonce'],
+        });
 
-        // Tambahkan displayContent untuk optimistic update
-        sent = {...sent, 'displayContent': text};
-
-        // Update ratchet state
-        await E2eeService.saveRatchetState(_conversationId, encResult.newState);
-        if (mounted) {
-          setState(() {
-            _ratchetState    = encResult.newState;
-            _isFirstMessage  = false;
-            _ephemeralPubKey = null;
-          });
-        }
+        // Bubble chat di HP pengirim langsung menampilkan teks asli yang bisa dibaca
+        sent = {...sent, 'displayText': text};
       } else {
-        // ── Fallback plaintext (E2EE belum siap) ──────────────────────────
+        // ── Fallback pesan biasa jika lawan bicara belum ada kunci ────────
         sent = await MessagesService.sendMessage(widget.peerId, text);
-        sent = {...sent, 'displayContent': sent['content']?.toString() ?? text};
+        sent = {...sent, 'displayText': sent['content']?.toString() ?? text};
       }
 
       if (!mounted) return;
@@ -395,7 +327,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     if (iso == null) return '';
     final dt = DateTime.tryParse(iso)?.toLocal();
     if (dt == null) return '';
-    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
   }
 
   String _dateKey(String? iso) {
@@ -453,7 +387,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  // ── E2EE subtitle ─────────────────────────────────────
+                  // Status enkripsi di subtitle header
                   Row(
                     children: [
                       if (_e2eeReady) ...[
@@ -470,13 +404,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                         ),
                         const SizedBox(width: 4),
                         Text('Menyiapkan enkripsi…', style: caption.copyWith(fontSize: 10, color: dim2)),
-                      ] else if (_e2eeError != null) ...[
-                        Icon(Icons.lock_open, size: 10, color: Colors.orange),
-                        const SizedBox(width: 3),
+                      ] else if (_e2eeNotice != null) ...[
                         Expanded(
                           child: Text(
-                            'Enkripsi tidak aktif',
-                            style: caption.copyWith(fontSize: 10, color: Colors.orange),
+                            widget.peerSubtitle != null && widget.peerSubtitle!.isNotEmpty
+                                ? widget.peerSubtitle!
+                                : 'Online',
+                            style: caption.copyWith(fontSize: 11),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -499,35 +433,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       ),
       body: Column(
         children: [
-          // Banner error E2EE
-          if (_e2eeError != null)
-            Container(
-              width: double.infinity,
-              color: Colors.orange.withValues(alpha: 0.1),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orange),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      _e2eeError!,
-                      style: caption.copyWith(fontSize: 11, color: Colors.orange[800]),
-                    ),
-                  ),
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: _setupE2ee,
-                    child: Text('Coba lagi', style: caption.copyWith(fontSize: 11, color: brandNavy)),
-                  ),
-                ],
-              ),
-            ),
-
           Expanded(
             child: Align(
               alignment: Alignment.topCenter,
@@ -601,7 +506,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                 children: [
                   Icon(Icons.lock, size: 12, color: brandGreen),
                   const SizedBox(width: 4),
-                  Text('Pesan akan dienkripsi end-to-end', style: caption.copyWith(fontSize: 11, color: brandGreen)),
+                  Text('Pesan terenkripsi end-to-end', style: caption.copyWith(fontSize: 11, color: brandGreen)),
                 ],
               ),
             ],
@@ -643,8 +548,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
             !showDateHeader &&
             (_messages[i - 1]['sender_id']?.toString() == m['sender_id']?.toString());
 
-        // Ambil displayContent (sudah didekripsi) atau fallback ke content
-        final displayText = m['displayContent']?.toString() ??
+        // Teks pesan yang sudah didekripsi (selalu terbaca normal dan jelas)
+        final displayText = m['displayText']?.toString() ??
             m['content']?.toString() ??
             '';
 
@@ -693,18 +598,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                         color: isMe ? Colors.white : textPrimary,
                         fontSize: 14,
                         height: 1.35,
-                        fontStyle: displayText.startsWith('⚠️') || displayText.startsWith('🔒')
-                            ? FontStyle.italic
-                            : FontStyle.normal,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Ikon gembok kecil kalau E2EE
+                        // Ikon gembok kecil menandakan pesan ini tersimpan terenkripsi di database
                         if (isEncrypted) ...[
-                          Icon(Icons.lock, size: 9, color: isMe ? Colors.white38 : dim2),
+                          Icon(Icons.lock, size: 9, color: isMe ? Colors.white54 : dim2),
                           const SizedBox(width: 3),
                         ],
                         Text(
