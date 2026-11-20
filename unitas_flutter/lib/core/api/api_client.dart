@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../crypto/e2ee_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -135,6 +136,7 @@ class ApiClient {
     _refreshCache = null;
     _loaded = true;
     try {
+      E2eeService.clearCache();
       await _storage.delete(key: _kAccess);
       await _storage.delete(key: _kRefresh);
       await _storage.delete(key: _kUser);

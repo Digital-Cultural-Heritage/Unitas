@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
+import '../core/api/auth_service.dart';
 import '../core/api/messages_service.dart';
+import '../core/crypto/e2ee_service.dart';
 import '../widgets/avatar.dart';
 import 'chat_room_screen.dart';
 
@@ -48,12 +50,48 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
     try {
       final res = await MessagesService.getConversations();
+      final user = await AuthService.getStoredUser();
+      final myId = user?['id']?.toString();
+
+      final list = (res['data'] as List? ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+
+      // Dekripsi preview pesan terakhir jika terenkripsi
+      if (myId != null && myId.isNotEmpty) {
+        for (final c in list) {
+          final ciphertext = c['last_message_ciphertext'] as String?;
+          final nonce      = c['last_message_nonce'] as String?;
+          final peer       = c['peer'] as Map<String, dynamic>? ?? {};
+          final peerId     = (peer['id'] ?? '').toString();
+          final peerPubKey = peer['identity_public_key'] as String?;
+
+          if (ciphertext != null && nonce != null && peerPubKey != null && peerPubKey.isNotEmpty && peerId.isNotEmpty) {
+            try {
+              final ids = [myId, peerId]..sort();
+              final convId = ids.join('_');
+              final convKey = await E2eeService.getConversationKey(
+                myUserId: myId,
+                conversationId: convId,
+                peerIdentityPublicKeyB64: peerPubKey,
+              );
+              final plain = await E2eeService.decryptMessage(
+                ciphertextB64: ciphertext,
+                nonceB64: nonce,
+                conversationKey: convKey,
+              );
+              c['last_message'] = plain;
+            } catch (_) {
+              // Jika gagal dekripsi, biarkan teks fallback
+            }
+          }
+        }
+      }
+
       if (mounted) {
         setState(() {
-          _conversations = (res['data'] as List? ?? [])
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
+          _conversations = list;
           _loading = false;
           _error = false;
         });

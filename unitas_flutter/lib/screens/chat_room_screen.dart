@@ -110,6 +110,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   /// Menghitung Conversation Secret Key via ECDH X25519 + HKDF.
   Future<void> _setupE2ee() async {
     if (!mounted) return;
+<<<<<<< Updated upstream
     setState(() => _e2eeInitializing = true);
 
     try {
@@ -122,6 +123,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         if (bundle != null) {
           final ok = await MessagesService.registerKeys(bundle);
           if (ok) await E2eeService.markKeysRegistered();
+=======
+    if (_myId == null) {
+      final user = await AuthService.getStoredUser();
+      if (!mounted) return;
+      _myId = user?['id']?.toString();
+    }
+    setState(() => _e2eeInitializing = true);
+
+    try {
+      final myId = _myId;
+      if (myId == null || myId.isEmpty) return;
+
+      // 1. Pastikan kunci identitas kita sendiri sudah ada & terdaftar ke server
+      if (!await E2eeService.hasIdentityKeys(myId)) {
+        await E2eeService.generateIdentityKeys(myId);
+      }
+      if (!await E2eeService.isRegisteredToServer(myId)) {
+        final bundle = await E2eeService.getPublicKeyBundle(myId);
+        if (bundle != null) {
+          final ok = await MessagesService.registerKeys(bundle);
+          if (ok) await E2eeService.markKeysRegistered(myId);
+>>>>>>> Stashed changes
         }
       }
 
@@ -143,6 +166,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
       // 3. Turunkan Secret Key percakapan (ECDH X25519)
       final convKey = await E2eeService.getConversationKey(
+<<<<<<< Updated upstream
+=======
+        myUserId: myId,
+>>>>>>> Stashed changes
         conversationId: _conversationId,
         peerIdentityPublicKeyB64: peerPubKey,
       );
@@ -196,6 +223,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       setState(() { _loading = true; _error = false; });
     }
     try {
+<<<<<<< Updated upstream
+=======
+      // Jika kunci enkripsi belum siap (misal lawan bicara baru login setelah kita buka chat),
+      // coba ambil kuncinya lagi secara otomatis
+      if (_conversationKey == null && mounted) {
+        await _setupE2ee();
+      }
+
+>>>>>>> Stashed changes
       final raw = await MessagesService.getMessages(widget.peerId);
       final decrypted = await _decryptMessages(raw);
 
@@ -241,6 +277,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       final nonce      = m['nonce'] as String?;
       final content    = m['content'] as String?;
 
+<<<<<<< Updated upstream
       if (ciphertext != null && nonce != null && key != null) {
         try {
           // Dekripsi ciphertext dari database menjadi teks asli
@@ -252,6 +289,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           result.add({...m, 'displayText': plain});
         } catch (_) {
           result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi'});
+=======
+      if (ciphertext != null && nonce != null) {
+        if (key != null) {
+          try {
+            // Dekripsi ciphertext dari database menjadi teks asli
+            final plain = await E2eeService.decryptMessage(
+              ciphertextB64: ciphertext,
+              nonceB64: nonce,
+              conversationKey: key,
+            );
+            result.add({...m, 'displayText': plain});
+          } catch (_) {
+            result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi'});
+          }
+        } else {
+          // Kunci belum didapat (lawan bicara belum register / sedang dimuat)
+          result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi (sedang memuat kunci…)'});
+>>>>>>> Stashed changes
         }
       } else if (content != null) {
         // Pesan biasa / legacy
@@ -659,7 +714,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _send(),
                     decoration: InputDecoration(
+<<<<<<< Updated upstream
                       hintText: _e2eeReady ? '🔒 Tulis pesan terenkripsi…' : 'Tulis pesan…',
+=======
+                      hintText: _e2eeReady ? 'Ketik pesan' : 'Ketik pesan…',
+>>>>>>> Stashed changes
                       hintStyle: caption,
                       filled: true,
                       fillColor: card,

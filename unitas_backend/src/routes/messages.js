@@ -51,12 +51,16 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
       return res.json({ data: [], total_unread: 0 });
     }
 
-    // Fetch latest messages & exact unread incoming rows in parallel so unread
-    // counts aren't lost when total message volume exceeds the preview window.
-    const [recentRes, unreadRes] = await Promise.all([
+    // Fetch latest messages, exact unread incoming rows, and peer public keys in parallel
+    const peerIds = peers.map((p) => p.id);
+    const [recentRes, unreadRes, keysRes] = await Promise.all([
       supabase
         .from("messages")
+<<<<<<< Updated upstream
         .select("id, sender_id, receiver_id, content, ciphertext, is_read, created_at")
+=======
+        .select("id, sender_id, receiver_id, content, ciphertext, nonce, is_read, created_at")
+>>>>>>> Stashed changes
         .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
         .order("created_at", { ascending: false })
         .limit(500),
@@ -66,9 +70,18 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
         .eq("receiver_id", userId)
         .eq("is_read", false)
         .limit(1000),
+      supabase
+        .from("user_keys")
+        .select("user_id, identity_public_key")
+        .in("user_id", peerIds),
     ]);
     if (recentRes.error) throw recentRes.error;
     if (unreadRes.error) throw unreadRes.error;
+
+    const keysByPeer = {};
+    for (const k of keysRes.data || []) {
+      keysByPeer[k.user_id] = k.identity_public_key;
+    }
 
     const latestByPeer = {};
     for (const m of recentRes.data || []) {
@@ -92,8 +105,18 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
         ? (lastMsg.ciphertext ? "🔒 Pesan terenkripsi" : lastMsg.content)
         : null;
       return {
+<<<<<<< Updated upstream
         peer,
         last_message: lastMsgPreview,
+=======
+        peer: {
+          ...peer,
+          identity_public_key: keysByPeer[peer.id] || null,
+        },
+        last_message: lastMsg ? (lastMsg.content || "🔒 Pesan terenkripsi") : null,
+        last_message_ciphertext: lastMsg ? lastMsg.ciphertext : null,
+        last_message_nonce: lastMsg ? lastMsg.nonce : null,
+>>>>>>> Stashed changes
         last_message_at: lastMsg ? lastMsg.created_at : null,
         unread_count: unreadByPeer[peer.id] || 0,
       };
