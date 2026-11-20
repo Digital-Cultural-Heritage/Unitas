@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 /// RatchetState — State Double Ratchet per percakapan
 ///
 /// Disimpan di FlutterSecureStorage dengan key: 'ratchet_state_{conversationId}'

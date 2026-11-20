@@ -42,8 +42,29 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      await AuthService.login(_emailCtrl.text.trim(), _passCtrl.text);
+      final email = _emailCtrl.text.trim();
+      final pass = _passCtrl.text;
+      final res = await AuthService.login(email, pass);
       if (!mounted) return;
+      if (res['require_otp'] == true) {
+        final verified = await showEmailOtpSheet(
+          context: context,
+          email: email,
+          title: 'Verifikasi Login',
+          subtitle: 'Masukkan kode OTP 6 digit yang dikirim ke email kampusmu.',
+          initialOtpToken: res['otp_token']?.toString(),
+          initialDevOtp: res['dev_otp']?.toString(),
+          onVerify: (otp, otpToken) async {
+            await AuthService.login(email, pass, otp: otp, otpToken: otpToken);
+          },
+          onResend: () => AuthService.sendOtp(
+            email: email,
+            purpose: 'login',
+            password: pass,
+          ),
+        );
+        if (!mounted || !verified) return;
+      }
       widget.onLoginSuccess();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -93,13 +114,13 @@ class _LoginScreenState extends State<LoginScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
               child: Form(
                 key: _formKey,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 12),
                     // Logo / Brand
                     Row(
                       children: [
@@ -131,14 +152,51 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 22),
                     Text('Selamat datang kembali', style: heading),
                     const SizedBox(height: 6),
                     Text(
                       'Masuk untuk melanjutkan',
                       style: body.copyWith(color: dim2),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: brandNavy.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: brandNavy.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(
+                              Icons.school_outlined,
+                              size: 16,
+                              color: brandNavy,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Khusus civitas & alumni Unud (@unud.ac.id atau @student.unud.ac.id). Pengguna baru bisa langsung masuk 1 klik lewat Google tanpa daftar manual.',
+                              style: caption.copyWith(
+                                color: brandNavy,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 22),
 
                     if (_error != null) ...[
                       AuthErrorBanner(message: _error!),
@@ -146,7 +204,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
 
                     // Email
-                    Text('Email', style: label.copyWith(fontSize: 13)),
+                    Text('Email Kampus', style: label.copyWith(fontSize: 13)),
                     const SizedBox(height: 6),
                     TextFormField(
                       controller: _emailCtrl,
@@ -157,11 +215,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       autocorrect: false,
                       style: body,
                       decoration: authInputDecoration(
-                        'email@contoh.com',
+                        'nama@student.unud.ac.id',
                         Icons.email_outlined,
                       ),
-                      validator: (v) =>
-                          isValidAuthEmail(v) ? null : 'Email tidak valid',
+                      validator: validateAuthEmail,
                     ),
                     const SizedBox(height: 18),
 
@@ -430,11 +487,10 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 textInputAction:
                     _otpSent ? TextInputAction.next : TextInputAction.done,
                 decoration: authInputDecoration(
-                  'nama@alumni.ac.id',
+                  'nama@student.unud.ac.id',
                   Icons.email_outlined,
                 ),
-                validator: (v) =>
-                    isValidAuthEmail(v) ? null : 'Email tidak valid',
+                validator: validateAuthEmail,
               ),
               if (_otpSent) ...[
                 const SizedBox(height: 12),

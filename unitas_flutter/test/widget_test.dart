@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:unitas_flutter/core/api/auth_service.dart';
 import 'package:unitas_flutter/core/theme/colors.dart';
 import 'package:unitas_flutter/core/utils/image_validator.dart';
 import 'package:unitas_flutter/core/utils/json_utils.dart';
@@ -31,11 +32,22 @@ void main() {
     expect(find.text('Lupa kata sandi?'), findsOneWidget);
     expect(find.text('Daftar sekarang'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Masuk'));
     await tester.tap(find.text('Masuk'));
     await tester.pump();
 
     expect(find.text('Email tidak valid'), findsOneWidget);
     expect(find.text('Password minimal 8 karakter'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField).first, 'user@gmail.com');
+    await tester.ensureVisible(find.text('Masuk'));
+    await tester.tap(find.text('Masuk'));
+    await tester.pump();
+
+    expect(find.text('Gunakan email @unud.ac.id atau @student.unud.ac.id'), findsOneWidget);
+    expect(AuthService.isAllowedUnudEmail('mahasiswa@student.unud.ac.id'), isTrue);
+    expect(AuthService.isAllowedUnudEmail('dosen@unud.ac.id'), isTrue);
+    expect(AuthService.isAllowedUnudEmail('outsider@gmail.com'), isFalse);
   });
 
   group('json_utils', () {

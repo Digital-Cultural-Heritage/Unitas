@@ -12,6 +12,11 @@ class AuthService {
       '900620974472-q2n23p2jtahugolc13a51ma0plo2pi1n.apps.googleusercontent.com';
   static Future<void>? _googleInit;
 
+  static bool isAllowedUnudEmail(String email) {
+    final trimmed = email.trim().toLowerCase();
+    return RegExp(r'^[^@\s]+@(student\.)?unud\.ac\.id$').hasMatch(trimmed);
+  }
+
   static String? get googleServerClientId {
     if (_envGoogleServerClientId.isNotEmpty) return _envGoogleServerClientId;
     try {
@@ -30,16 +35,54 @@ class AuthService {
         });
   }
 
-  // ── Login ──────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> login(
-    String email,
-    String password,
-  ) async {
+  // ── OTP & Login ────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> sendOtp({
+    required String email,
+    String purpose = 'register',
+    String? password,
+  }) async {
+    final body = <String, dynamic>{
+      'email': email.trim(),
+      'purpose': purpose,
+    };
+    if (password != null && password.isNotEmpty) {
+      body['password'] = password;
+    }
     final res = await ApiClient.post(
-      '/api/auth/login',
-      body: {'email': email.trim(), 'password': password},
+      '/api/auth/send-otp',
+      body: body,
       auth: false,
     );
+    if (res is! Map) {
+      throw const ApiException('Respons server tidak valid.', 500);
+    }
+    return Map<String, dynamic>.from(res);
+  }
+
+  static Future<Map<String, dynamic>> login(
+    String email,
+    String password, {
+    String? otp,
+    String? otpToken,
+  }) async {
+    final body = <String, dynamic>{
+      'email': email.trim(),
+      'password': password,
+    };
+    if (otp != null && otp.trim().isNotEmpty) {
+      body['otp'] = otp.trim();
+    }
+    if (otpToken != null && otpToken.isNotEmpty) {
+      body['otp_token'] = otpToken;
+    }
+    final res = await ApiClient.post(
+      '/api/auth/login',
+      body: body,
+      auth: false,
+    );
+    if (res is Map && res['require_otp'] == true) {
+      return Map<String, dynamic>.from(res);
+    }
     await _saveSession(res);
     return Map<String, dynamic>.from(res as Map);
   }
@@ -52,6 +95,8 @@ class AuthService {
     required String prodi,
     required String angkatan,
     String? kota,
+    required String otp,
+    String? otpToken,
   }) async {
     final trimmedKota = kota?.trim();
     final body = <String, dynamic>{
@@ -60,7 +105,11 @@ class AuthService {
       'full_name': fullName.trim(),
       'prodi': prodi.trim(),
       'angkatan': angkatan.trim(),
+      'otp': otp.trim(),
     };
+    if (otpToken != null && otpToken.isNotEmpty) {
+      body['otp_token'] = otpToken;
+    }
     if (trimmedKota != null && trimmedKota.isNotEmpty) {
       body['kota'] = trimmedKota;
     }
@@ -88,6 +137,14 @@ class AuthService {
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) return null;
       throw ApiException(_mapGoogleError(e), 400);
+    }
+
+    if (!isAllowedUnudEmail(account.email)) {
+      await signOutGoogleQuietly();
+      throw const ApiException(
+        'Hanya email kampus (@unud.ac.id atau @student.unud.ac.id) yang diizinkan.',
+        403,
+      );
     }
 
     final idToken = account.authentication.idToken;

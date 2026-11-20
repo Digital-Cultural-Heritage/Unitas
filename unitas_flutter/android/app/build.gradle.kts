@@ -64,6 +64,33 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Compress native .so libraries in the APK (prevents 51+ MB uncompressed .so expansion on minSdk >= 24)
+            useLegacyPackaging = true
+            // Strip the 14.53 MB Khronos Vulkan debug validation layer & unused x86 emulator JNI libs
+            excludes += listOf(
+                "**/libVkLayer_khronos_validation.so",
+                "lib/x86/**",
+                "lib/x86_64/**"
+            )
+        }
+        resources {
+            excludes += listOf(
+                "META-INF/*.kotlin_module",
+                "META-INF/LICENSE*",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1"
+            )
         }
     }
 }

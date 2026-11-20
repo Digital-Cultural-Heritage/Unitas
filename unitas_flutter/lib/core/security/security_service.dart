@@ -25,7 +25,7 @@ class SecurityService {
     try {
       final result = await _channel.invokeMethod<bool>('isRooted');
       return result ?? false;
-    } on PlatformException catch (e) {
+    } on PlatformException {
       // Jika native gagal dipanggil (e.g. di emulator CI), tidak block app.
       return false;
     }

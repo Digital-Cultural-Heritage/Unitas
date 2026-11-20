@@ -378,8 +378,12 @@ describe("Unitas Backend API", () => {
 
       savedEnv.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
       savedEnv.GOOGLE_SERVER_CLIENT_IDS = process.env.GOOGLE_SERVER_CLIENT_IDS;
+      savedEnv.SMTP_USER = process.env.SMTP_USER;
+      savedEnv.SMTP_PASS = process.env.SMTP_PASS;
       process.env.GOOGLE_CLIENT_ID = "web-client-1.apps.googleusercontent.com";
       process.env.GOOGLE_SERVER_CLIENT_IDS = "extra-client-2.apps.googleusercontent.com";
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
     });
 
     afterEach(() => {
@@ -388,52 +392,116 @@ describe("Unitas Backend API", () => {
       else process.env.GOOGLE_CLIENT_ID = savedEnv.GOOGLE_CLIENT_ID;
       if (savedEnv.GOOGLE_SERVER_CLIENT_IDS === undefined) delete process.env.GOOGLE_SERVER_CLIENT_IDS;
       else process.env.GOOGLE_SERVER_CLIENT_IDS = savedEnv.GOOGLE_SERVER_CLIENT_IDS;
+      if (savedEnv.SMTP_USER === undefined) delete process.env.SMTP_USER;
+      else process.env.SMTP_USER = savedEnv.SMTP_USER;
+      if (savedEnv.SMTP_PASS === undefined) delete process.env.SMTP_PASS;
+      else process.env.SMTP_PASS = savedEnv.SMTP_PASS;
     });
 
-    it("register -> login -> /api/auth/me -> refresh rotation -> logout", async () => {
-      const reg = await request("POST", "/api/auth/register", {
-        email: "Budi@Example.com",
+    it("register -> login (2-step OTP) -> /api/auth/me -> refresh rotation -> logout, plus domain enforcement", async () => {
+      // Non-Unud emails are rejected
+      const badSendOtp = await request("POST", "/api/auth/send-otp", {
+        email: "outsider@gmail.com",
+        purpose: "register",
+      });
+      assert.equal(badSendOtp.status, 400);
+
+      const badRegDomain = await request("POST", "/api/auth/register", {
+        email: "outsider@example.com",
+        password: "Password123",
+        full_name: "Outsider",
+        prodi: "Informatika",
+        angkatan: 2021,
+        otp: "123456",
+      });
+      assert.equal(badRegDomain.status, 400);
+
+      const badLoginDomain = await request("POST", "/api/auth/login", {
+        email: "outsider@gmail.com",
+        password: "Password123",
+      });
+      assert.equal(badLoginDomain.status, 400);
+
+      // Step 1: request register OTP for student.unud.ac.id (and a second concurrent OTP for race-duplicate check)
+      const otpRes = await request("POST", "/api/auth/send-otp", {
+        email: "Budi@Student.Unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(otpRes.status, 200);
+      assert.ok(otpRes.body.otp_token);
+      assert.ok(otpRes.body.dev_otp);
+
+      const otpConcurrent = await request("POST", "/api/auth/send-otp", {
+        email: "budi@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(otpConcurrent.status, 200);
+
+      // Register without valid OTP fails with 400
+      const noOtpReg = await request("POST", "/api/auth/register", {
+        email: "Budi@Student.Unud.ac.id",
         password: "Password123",
         full_name: "Budi Santoso",
         prodi: "Informatika",
         angkatan: 2021,
       });
+      assert.equal(noOtpReg.status, 400);
+
+      // Step 2: complete registration with OTP
+      const reg = await request("POST", "/api/auth/register", {
+        email: "Budi@Student.Unud.ac.id",
+        password: "Password123",
+        full_name: "Budi Santoso",
+        prodi: "Informatika",
+        angkatan: 2021,
+        otp: otpRes.body.dev_otp,
+        otp_token: otpRes.body.otp_token,
+      });
       assert.equal(reg.status, 201);
       assert.ok(reg.body.access_token);
       assert.ok(reg.body.refresh_token);
-      assert.equal(reg.body.user.email, "budi@example.com");
+      assert.equal(reg.body.user.email, "budi@student.unud.ac.id");
       assert.equal(reg.body.user.full_name, "Budi Santoso");
       assert.equal(reg.body.user.avatar_url, null);
 
-      // Duplicate email -> 409
+      // Duplicate email -> 409 on both /send-otp and /register (concurrent race)
+      const dupOtp = await request("POST", "/api/auth/send-otp", {
+        email: "budi@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(dupOtp.status, 409);
+
       const dup = await request("POST", "/api/auth/register", {
-        email: "budi@example.com",
+        email: "budi@student.unud.ac.id",
         password: "Password123",
         full_name: "Budi 2",
         prodi: "SI",
         angkatan: "2021",
+        otp: otpConcurrent.body.dev_otp,
+        otp_token: otpConcurrent.body.otp_token,
       });
       assert.equal(dup.status, 409);
 
       // Wrong password vs unknown email return identical 401
       const wrongPass = await request("POST", "/api/auth/login", {
-        email: "budi@example.com",
+        email: "budi@student.unud.ac.id",
         password: "WrongPassword",
       });
       const unknownEmail = await request("POST", "/api/auth/login", {
-        email: "nobody@example.com",
+        email: "nobody@unud.ac.id",
         password: "WrongPassword",
       });
       assert.equal(wrongPass.status, 401);
       assert.equal(unknownEmail.status, 401);
       assert.equal(wrongPass.body.error, unknownEmail.body.error);
 
-      // Valid login
+      // Valid login returns tokens & user directly (no OTP required on routine login)
       const login = await request("POST", "/api/auth/login", {
-        email: "budi@example.com",
+        email: "budi@student.unud.ac.id",
         password: "Password123",
       });
       assert.equal(login.status, 200);
+      assert.equal(login.body.require_otp, undefined);
       assert.deepEqual(Object.keys(login.body).sort(), ["access_token", "refresh_token", "user"]);
       assert.deepEqual(
         Object.keys(login.body.user).sort(),
@@ -446,7 +514,7 @@ describe("Unitas Backend API", () => {
       });
       assert.equal(me.status, 200);
       assert.equal(me.body.id, login.body.user.id);
-      assert.equal(me.body.email, "budi@example.com");
+      assert.equal(me.body.email, "budi@student.unud.ac.id");
       assert.equal(me.body.full_name, "Budi Santoso");
 
       // Refresh rotates token and invalidates the old refresh token
@@ -475,7 +543,7 @@ describe("Unitas Backend API", () => {
       assert.equal(afterLogout.status, 401);
     });
 
-    it("POST /api/auth/google validates, verifies audience/email_verified, creates & links users", async () => {
+    it("POST /api/auth/google enforces Unud domains, verifies audience/email_verified, creates & links users", async () => {
       // 400 when id_token missing
       const emptyRes = await request("POST", "/api/auth/google", {});
       assert.equal(emptyRes.status, 400);
@@ -496,13 +564,25 @@ describe("Unitas Backend API", () => {
       googleMock.mock.mockImplementationOnce(async () => ({
         getPayload: () => ({
           sub: "g-1",
-          email: "unverified@gmail.com",
+          email: "unverified@student.unud.ac.id",
           email_verified: false,
           name: "Unverified",
         }),
       }));
       const unverifiedRes = await request("POST", "/api/auth/google", { id_token: "unverified-tok" });
       assert.equal(unverifiedRes.status, 403);
+
+      // 403 when email domain is not @unud.ac.id or @student.unud.ac.id
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-outsider",
+          email: "outsider@gmail.com",
+          email_verified: true,
+          name: "Outsider",
+        }),
+      }));
+      const badDomainRes = await request("POST", "/api/auth/google", { id_token: "outsider-tok" });
+      assert.equal(badDomainRes.status, 403);
 
       // 200 creates new user with exact /login shape and verifies audience list
       let capturedAudience;
@@ -511,7 +591,7 @@ describe("Unitas Backend API", () => {
         return {
           getPayload: () => ({
             sub: "google-sub-123",
-            email: "Siti.Alumni@gmail.com",
+            email: "Siti.Alumni@student.unud.ac.id",
             email_verified: true,
             name: "Siti Alumni",
             picture: "https://lh3.googleusercontent.com/a/avatar",
@@ -543,7 +623,7 @@ describe("Unitas Backend API", () => {
       googleMock.mock.mockImplementationOnce(async () => ({
         getPayload: () => ({
           sub: "different-google-sub",
-          email: "Siti.Alumni@gmail.com",
+          email: "Siti.Alumni@student.unud.ac.id",
           email_verified: true,
           name: "Impostor",
         }),
@@ -551,18 +631,24 @@ describe("Unitas Backend API", () => {
       const conflictRes = await request("POST", "/api/auth/google", { id_token: "other-tok" });
       assert.equal(conflictRes.status, 409);
 
-      // Existing email+password user links Google sub cleanly on first Google sign-in
+      // Existing email+password user (@unud.ac.id) links Google sub cleanly on first Google sign-in
+      const manualOtp = await request("POST", "/api/auth/send-otp", {
+        email: "manual@unud.ac.id",
+        purpose: "register",
+      });
       await request("POST", "/api/auth/register", {
-        email: "manual@example.com",
+        email: "manual@unud.ac.id",
         password: "Password123",
         full_name: "Manual User",
         prodi: "Elektro",
         angkatan: "2020",
+        otp: manualOtp.body.dev_otp,
+        otp_token: manualOtp.body.otp_token,
       });
       googleMock.mock.mockImplementationOnce(async () => ({
         getPayload: () => ({
           sub: "google-sub-manual",
-          email: "manual@example.com",
+          email: "manual@unud.ac.id",
           email_verified: true,
           name: "Manual User",
           picture: "https://lh3.googleusercontent.com/a/manual",
@@ -572,28 +658,40 @@ describe("Unitas Backend API", () => {
       assert.equal(linkedRes.status, 200);
       assert.equal(linkedRes.body.user.full_name, "Manual User");
       assert.equal(linkedRes.body.user.avatar_url, "https://lh3.googleusercontent.com/a/manual");
-      const dbUser = db.tables.users.find((u) => u.email === "manual@example.com");
+      const dbUser = db.tables.users.find((u) => u.email === "manual@unud.ac.id");
       assert.equal(dbUser.google_sub, "google-sub-manual");
     });
 
-    it("forgot-password & reset-password hash OTP, enforce attempt limit, and revoke refresh tokens", async () => {
+    it("forgot-password & reset-password hash OTP, enforce domain & attempt limit, and revoke refresh tokens", async () => {
+      const regOtp = await request("POST", "/api/auth/send-otp", {
+        email: "reset@unud.ac.id",
+        purpose: "register",
+      });
       await request("POST", "/api/auth/register", {
-        email: "reset@example.com",
+        email: "reset@unud.ac.id",
         password: "OldPassword1",
         full_name: "Reset User",
         prodi: "Informatika",
         angkatan: "2022",
+        otp: regOtp.body.dev_otp,
+        otp_token: regOtp.body.otp_token,
       });
 
-      // Anti-enumeration on unknown email
-      const unknownForgot = await request("POST", "/api/auth/forgot-password", {
+      // Non-Unud email rejected
+      const badDomainForgot = await request("POST", "/api/auth/forgot-password", {
         email: "unknown@example.com",
+      });
+      assert.equal(badDomainForgot.status, 400);
+
+      // Anti-enumeration on unknown Unud email
+      const unknownForgot = await request("POST", "/api/auth/forgot-password", {
+        email: "unknown@unud.ac.id",
       });
       assert.equal(unknownForgot.status, 200);
       assert.equal(unknownForgot.body.dev_otp, undefined);
 
       const forgot = await request("POST", "/api/auth/forgot-password", {
-        email: "reset@example.com",
+        email: "reset@unud.ac.id",
       });
       assert.equal(forgot.status, 200);
       assert.ok(forgot.body.dev_otp);
@@ -603,7 +701,7 @@ describe("Unitas Backend API", () => {
       // 5 wrong attempts invalidate the OTP
       for (let i = 0; i < 6; i++) {
         const bad = await request("POST", "/api/auth/reset-password", {
-          email: "reset@example.com",
+          email: "reset@unud.ac.id",
           otp: "000000",
           new_password: "NewPassword1",
         });
@@ -613,29 +711,36 @@ describe("Unitas Backend API", () => {
 
       // Fresh OTP works and revokes existing sessions
       const forgot2 = await request("POST", "/api/auth/forgot-password", {
-        email: "reset@example.com",
+        email: "reset@unud.ac.id",
       });
       const resetOk = await request("POST", "/api/auth/reset-password", {
-        email: "reset@example.com",
+        email: "reset@unud.ac.id",
         otp: forgot2.body.dev_otp,
         new_password: "NewPassword1",
       });
       assert.equal(resetOk.status, 200);
 
       const loginNew = await request("POST", "/api/auth/login", {
-        email: "reset@example.com",
+        email: "reset@unud.ac.id",
         password: "NewPassword1",
       });
       assert.equal(loginNew.status, 200);
+      assert.ok(loginNew.body.access_token);
     });
 
     it("change-password works for password users, revokes refresh token, and blocks Google-only users", async () => {
+      const cpOtp = await request("POST", "/api/auth/send-otp", {
+        email: "cp@unud.ac.id",
+        purpose: "register",
+      });
       const reg = await request("POST", "/api/auth/register", {
-        email: "cp@example.com",
+        email: "cp@unud.ac.id",
         password: "Password123",
         full_name: "CP User",
         prodi: "SI",
         angkatan: "2021",
+        otp: cpOtp.body.dev_otp,
+        otp_token: cpOtp.body.otp_token,
       });
       assert.equal(reg.status, 201);
 
@@ -666,7 +771,7 @@ describe("Unitas Backend API", () => {
       googleMock.mock.mockImplementationOnce(async () => ({
         getPayload: () => ({
           sub: "g-cp-1",
-          email: "gonly@gmail.com",
+          email: "gonly@student.unud.ac.id",
           email_verified: true,
           name: "G Only",
         }),
@@ -681,6 +786,47 @@ describe("Unitas Backend API", () => {
         { Authorization: `Bearer ${gRes.body.access_token}` }
       );
       assert.equal(gChange.status, 400);
+    });
+
+    it("sends OTP via SMTP no-reply when SMTP env is configured", async () => {
+      const nodemailer = require("nodemailer");
+      const sentMails = [];
+      mock.method(nodemailer, "createTransport", () => ({
+        sendMail: async (msg) => {
+          sentMails.push(msg);
+          return { messageId: "smtp-msg-1" };
+        },
+      }));
+
+      const prev = {
+        SMTP_HOST: process.env.SMTP_HOST,
+        SMTP_USER: process.env.SMTP_USER,
+        SMTP_PASS: process.env.SMTP_PASS,
+        EMAIL_FROM: process.env.EMAIL_FROM,
+      };
+      process.env.SMTP_HOST = "smtp.gmail.com";
+      process.env.SMTP_USER = "unitas.noreply@gmail.com";
+      process.env.SMTP_PASS = "app-password-test";
+      process.env.EMAIL_FROM = "Unitas No-Reply <noreply@unud.ac.id>";
+
+      try {
+        const res = await request("POST", "/api/auth/send-otp", {
+          email: "smtp.test@student.unud.ac.id",
+          purpose: "register",
+        });
+        assert.equal(res.status, 200);
+        assert.equal(res.body.dev_otp, undefined);
+        assert.ok(res.body.otp_token);
+        assert.equal(sentMails.length, 1);
+        assert.equal(sentMails[0].to, "smtp.test@student.unud.ac.id");
+        assert.equal(sentMails[0].replyTo, "noreply@unud.ac.id");
+        assert.match(sentMails[0].text, /\d{6}/);
+      } finally {
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }
     });
   });
 });

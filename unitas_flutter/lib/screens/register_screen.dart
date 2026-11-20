@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -7,11 +8,19 @@ import '../core/api/auth_service.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 
-bool isValidAuthEmail(String? value) {
-  if (value == null) return false;
+String? validateAuthEmail(String? value) {
+  if (value == null) return 'Email tidak valid';
   final trimmed = value.trim();
-  return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmed);
+  if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmed)) {
+    return 'Email tidak valid';
+  }
+  if (!AuthService.isAllowedUnudEmail(trimmed)) {
+    return 'Gunakan email @unud.ac.id atau @student.unud.ac.id';
+  }
+  return null;
 }
+
+bool isValidAuthEmail(String? value) => validateAuthEmail(value) == null;
 
 String? validateAuthPassword(String? value, {bool checkMaxBytes = false}) {
   if (value == null || value.length < 8) {
@@ -158,6 +167,12 @@ class GoogleContinueButton extends StatelessWidget {
                   ),
           ),
         ),
+        const SizedBox(height: 8),
+        Text(
+          'Gunakan akun Google kampus (@unud.ac.id atau @student.unud.ac.id)',
+          style: caption.copyWith(color: dim2, fontSize: 11.5),
+          textAlign: TextAlign.center,
+        ),
       ],
     );
   }
@@ -224,11 +239,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _angkCtrl = TextEditingController();
   final _kotaCtrl = TextEditingController();
   bool _loading = false;
-  bool _googleLoading = false;
   bool _obscure = true;
   String? _error;
 
-  bool get _busy => _loading || _googleLoading;
+  bool get _busy => _loading;
 
   @override
   void dispose() {
@@ -250,15 +264,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _error = null;
     });
     try {
-      await AuthService.register(
-        email: _emailCtrl.text.trim(),
-        password: _passCtrl.text,
-        fullName: _nameCtrl.text.trim(),
-        prodi: _prodiCtrl.text.trim(),
-        angkatan: _angkCtrl.text.trim(),
-        kota: _kotaCtrl.text.trim(),
-      );
+      final email = _emailCtrl.text.trim();
+      final otpRes = await AuthService.sendOtp(email: email, purpose: 'register');
       if (!mounted) return;
+      final verified = await showEmailOtpSheet(
+        context: context,
+        email: email,
+        title: 'Verifikasi Email Kampus',
+        subtitle: 'Masukkan kode OTP 6 digit yang dikirim ke email kampusmu untuk menyelesaikan pendaftaran.',
+        initialOtpToken: otpRes['otp_token']?.toString(),
+        initialDevOtp: otpRes['dev_otp']?.toString(),
+        onVerify: (otp, otpToken) async {
+          await AuthService.register(
+            email: email,
+            password: _passCtrl.text,
+            fullName: _nameCtrl.text.trim(),
+            prodi: _prodiCtrl.text.trim(),
+            angkatan: _angkCtrl.text.trim(),
+            kota: _kotaCtrl.text.trim(),
+            otp: otp,
+            otpToken: otpToken,
+          );
+        },
+        onResend: () => AuthService.sendOtp(email: email, purpose: 'register'),
+      );
+      if (!mounted || !verified) return;
       Navigator.of(context).popUntil((route) => route.isFirst);
       widget.onRegisterSuccess();
     } on ApiException catch (e) {
@@ -269,32 +299,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = 'Tidak dapat terhubung ke server.');
     } finally {
       if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _continueWithGoogle() async {
-    if (_busy) return;
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _googleLoading = true;
-      _error = null;
-    });
-    try {
-      final session = await AuthService.signInWithGoogle();
-      if (!mounted) return;
-      if (session == null) return;
-      Navigator.of(context).popUntil((route) => route.isFirst);
-      widget.onRegisterSuccess();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _error = 'Gagal masuk dengan Google. Cek koneksi atau coba lagi.',
-      );
-    } finally {
-      if (mounted) setState(() => _googleLoading = false);
     }
   }
 
@@ -323,10 +327,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Text('Bergabung dengan Unitas', style: heading),
                     const SizedBox(height: 6),
                     Text(
-                      'Platform alumni terbesar Indonesia',
+                      'Platform alumni Universitas Udayana',
                       style: body.copyWith(color: dim2),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: brandNavy.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: brandNavy.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(
+                              Icons.info_outline,
+                              size: 16,
+                              color: brandNavy,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Gunakan email resmi kampus (@unud.ac.id atau @student.unud.ac.id). Kode verifikasi OTP 6 digit akan dikirim ke email tersebut. Atau kembali ke Masuk untuk daftar 1 klik lewat Google.',
+                              style: caption.copyWith(
+                                color: brandNavy,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
 
                     if (_error != null) ...[
                       AuthErrorBanner(message: _error!),
@@ -349,15 +390,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 14),
                     _field(
-                      'Email',
+                      'Email Kampus',
                       _emailCtrl,
                       Icons.email_outlined,
-                      'email@contoh.com',
+                      'nama@student.unud.ac.id',
                       type: TextInputType.emailAddress,
                       autofillHints: const [AutofillHints.email],
                       action: TextInputAction.next,
-                      validator: (v) =>
-                          isValidAuthEmail(v) ? null : 'Email tidak valid',
+                      validator: validateAuthEmail,
                     ),
                     const SizedBox(height: 14),
 
@@ -478,13 +518,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-
-                    GoogleContinueButton(
-                      loading: _googleLoading,
-                      disabled: _busy,
-                      onPressed: _continueWithGoogle,
-                    ),
                     const SizedBox(height: 20),
 
                     Row(
@@ -545,6 +578,287 @@ class _RegisterScreenState extends State<RegisterScreen> {
           validator: validator,
         ),
       ],
+    );
+  }
+}
+
+Future<bool> showEmailOtpSheet({
+  required BuildContext context,
+  required String email,
+  required String title,
+  required String subtitle,
+  String? initialOtpToken,
+  String? initialDevOtp,
+  required Future<void> Function(String otp, String? otpToken) onVerify,
+  required Future<Map<String, dynamic>> Function() onResend,
+}) async {
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    isDismissible: false,
+    enableDrag: false,
+    backgroundColor: brandBg,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => _EmailOtpSheet(
+      email: email,
+      title: title,
+      subtitle: subtitle,
+      initialOtpToken: initialOtpToken,
+      initialDevOtp: initialDevOtp,
+      onVerify: onVerify,
+      onResend: onResend,
+    ),
+  );
+  return result == true;
+}
+
+class _EmailOtpSheet extends StatefulWidget {
+  final String email;
+  final String title;
+  final String subtitle;
+  final String? initialOtpToken;
+  final String? initialDevOtp;
+  final Future<void> Function(String otp, String? otpToken) onVerify;
+  final Future<Map<String, dynamic>> Function() onResend;
+
+  const _EmailOtpSheet({
+    required this.email,
+    required this.title,
+    required this.subtitle,
+    this.initialOtpToken,
+    this.initialDevOtp,
+    required this.onVerify,
+    required this.onResend,
+  });
+
+  @override
+  State<_EmailOtpSheet> createState() => _EmailOtpSheetState();
+}
+
+class _EmailOtpSheetState extends State<_EmailOtpSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _otpCtrl = TextEditingController();
+  late String? _otpToken = widget.initialOtpToken;
+  late String? _devOtpHint = widget.initialDevOtp;
+  bool _verifying = false;
+  bool _resending = false;
+  String? _errMsg;
+  int _cooldown = 60;
+  Timer? _timer;
+
+  bool get _busy => _verifying || _resending;
+
+  @override
+  void initState() {
+    super.initState();
+    _startCooldown();
+  }
+
+  void _startCooldown() {
+    _timer?.cancel();
+    _cooldown = 60;
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (_cooldown <= 1) {
+        t.cancel();
+        setState(() => _cooldown = 0);
+      } else {
+        setState(() => _cooldown--);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _otpCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _verifying = true;
+      _errMsg = null;
+    });
+    try {
+      await widget.onVerify(_otpCtrl.text.trim(), _otpToken);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _errMsg = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errMsg = 'Tidak dapat terhubung ke server.');
+    } finally {
+      if (mounted) setState(() => _verifying = false);
+    }
+  }
+
+  Future<void> _resend() async {
+    if (_busy || _cooldown > 0) return;
+    setState(() {
+      _resending = true;
+      _errMsg = null;
+    });
+    try {
+      final res = await widget.onResend();
+      if (!mounted) return;
+      setState(() {
+        _otpToken = res['otp_token']?.toString() ?? _otpToken;
+        _devOtpHint = res['dev_otp']?.toString();
+      });
+      _startCooldown();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _errMsg = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errMsg = 'Gagal mengirim ulang OTP.');
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: heading.copyWith(fontSize: 18),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: dim2, size: 20),
+                      onPressed: _busy ? null : () => Navigator.pop(context, false),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(widget.subtitle, style: caption),
+                const SizedBox(height: 4),
+                Text(
+                  widget.email,
+                  style: caption.copyWith(
+                    color: brandNavy,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (_errMsg != null) ...[
+                  AuthErrorBanner(message: _errMsg!),
+                  const SizedBox(height: 10),
+                ],
+                if (_devOtpHint != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: brandGold.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Kode OTP (dev): $_devOtpHint',
+                      style: label.copyWith(color: brandNavy),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                TextFormField(
+                  controller: _otpCtrl,
+                  enabled: !_busy,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _submit(),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
+                  decoration: authInputDecoration(
+                    'Kode OTP 6 digit',
+                    Icons.pin_outlined,
+                  ),
+                  validator: (v) =>
+                      v != null && RegExp(r'^\d{6}$').hasMatch(v.trim())
+                          ? null
+                          : 'Kode OTP harus 6 digit',
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brandNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: _busy ? null : _submit,
+                  child: _verifying
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text('Verifikasi Kode OTP', style: buttonStyle),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: (_busy || _cooldown > 0) ? null : _resend,
+                  child: _resending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            color: brandNavy,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          _cooldown > 0
+                              ? 'Kirim Ulang OTP ($_cooldown dtk)'
+                              : 'Kirim Ulang OTP',
+                          style: caption.copyWith(
+                            color: _cooldown > 0 ? dim2 : brandNavy,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

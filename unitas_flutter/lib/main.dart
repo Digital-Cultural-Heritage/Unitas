@@ -21,6 +21,9 @@ import 'screens/profile_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Batasi cache gambar di memori agar pemakaian RAM tetap ringan
+  PaintingBinding.instance.imageCache.maximumSize = 120;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 30 * 1024 * 1024;
   try {
     await dotenv.load(fileName: '.env');
   } catch (_) {}

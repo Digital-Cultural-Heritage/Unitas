@@ -1,12 +1,14 @@
 ﻿const express = require("express");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const validator = require("validator");
 const rateLimit = require("express-rate-limit");
 const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require("../lib/jwt");
 const { requireAuth } = require("../middleware/auth");
+const { sendOtpEmail } = require("../lib/mailer");
 
 const router = express.Router();
 
@@ -17,6 +19,107 @@ const DUMMY_HASH = "$2b$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW
 const NO_PASSWORD = "!no-password";
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_TTL_MS = 15 * 60 * 1000;
+const CAMPUS_EMAIL_ERROR =
+  "Hanya email kampus (@unud.ac.id atau @student.unud.ac.id) yang diizinkan";
+
+function allowedEmailDomains() {
+  const raw = process.env.ALLOWED_EMAIL_DOMAINS ?? "unud.ac.id,student.unud.ac.id";
+  return String(raw)
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isAllowedCampusEmail(email) {
+  if (typeof email !== "string") return false;
+  const parts = email.trim().toLowerCase().split("@");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+  return allowedEmailDomains().includes(parts[1]);
+}
+
+const pendingEmailOtps = new Map();
+
+function pruneExpiredEmailOtps(now = Date.now()) {
+  for (const [k, v] of pendingEmailOtps.entries()) {
+    if (!v || v.expiresAt <= now) pendingEmailOtps.delete(k);
+  }
+}
+
+function issueEmailOtp(email, purpose) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    const err = new Error("JWT_SECRET belum dikonfigurasi");
+    err.status = 500;
+    throw err;
+  }
+  const now = Date.now();
+  pruneExpiredEmailOtps(now);
+  const otpCode = String(crypto.randomInt(100000, 1000000));
+  const digest = otpDigest(`${purpose}:${email}`, otpCode);
+  pendingEmailOtps.set(`${purpose}:${email}`, {
+    digest,
+    expiresAt: now + OTP_TTL_MS,
+    attempts: 0,
+  });
+  const otpToken = jwt.sign(
+    { typ: "email_otp", email, purpose, digest },
+    secret,
+    { algorithm: "HS256", expiresIn: "15m" }
+  );
+  return { otpCode, otpToken };
+}
+
+function verifyEmailOtp({ email, otp, otpToken, purpose }) {
+  const code = String(otp || "").trim();
+  if (!/^\d{6}$/.test(code)) return false;
+
+  const key = `${purpose}:${email}`;
+  const entry = pendingEmailOtps.get(key);
+  const now = Date.now();
+  if (entry) {
+    if (entry.expiresAt <= now) {
+      pendingEmailOtps.delete(key);
+      return false;
+    }
+    if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+      return false;
+    }
+  }
+
+  const expected = otpDigest(`${purpose}:${email}`, code);
+  if (otpToken && typeof otpToken === "string") {
+    try {
+      const decoded = jwt.verify(otpToken, process.env.JWT_SECRET || "", {
+        algorithms: ["HS256"],
+      });
+      if (
+        !decoded ||
+        decoded.typ !== "email_otp" ||
+        decoded.purpose !== purpose ||
+        decoded.email !== email ||
+        !decoded.digest
+      ) {
+        return false;
+      }
+      if (!safeEqual(decoded.digest, expected)) {
+        if (entry) entry.attempts += 1;
+        return false;
+      }
+      pendingEmailOtps.delete(key);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!entry) return false;
+  if (!safeEqual(entry.digest, expected)) {
+    entry.attempts += 1;
+    return false;
+  }
+  pendingEmailOtps.delete(key);
+  return true;
+}
 
 // ── Rate limiting ────────────────────────────────────────────────────────
 // Catatan: di Vercel (serverless) store-nya in-memory per instance, jadi ini
@@ -118,12 +221,82 @@ function sessionResponse({ accessToken, refreshToken }, user, profile) {
   };
 }
 
+// ── POST /api/auth/send-otp ───────────────────────────────────────────────
+router.post(
+  "/send-otp",
+  otpLimiter(10),
+  [body("email").isEmail().normalizeEmail().withMessage("Email tidak valid")],
+  async (req, res, next) => {
+    if (!validate(req, res)) return;
+    try {
+      const { email } = req.body;
+      if (!isAllowedCampusEmail(email)) {
+        return res.status(400).json({ error: CAMPUS_EMAIL_ERROR });
+      }
+
+      const purpose = req.body.purpose === undefined ? "register" : String(req.body.purpose).trim();
+      if (purpose !== "register" && purpose !== "login") {
+        return res.status(400).json({ error: "Purpose OTP tidak valid" });
+      }
+
+      if (purpose === "register") {
+        const { data: existing, error } = await supabase
+          .from("users")
+          .select("id")
+          .eq("email", email)
+          .maybeSingle();
+        if (error) throw error;
+        if (existing) return res.status(409).json({ error: "Email sudah terdaftar" });
+      } else {
+        const password = req.body.password;
+        if (typeof password !== "string" || !password) {
+          return res.status(400).json({ error: "Password wajib diisi" });
+        }
+        const { data: user, error } = await supabase
+          .from("users")
+          .select("id, email, password_hash, role")
+          .eq("email", email)
+          .maybeSingle();
+        if (error) throw error;
+        const match = await bcrypt.compare(
+          password,
+          user && hasPassword(user.password_hash) ? user.password_hash : DUMMY_HASH
+        );
+        if (!user || !match) return res.status(401).json({ error: "Email atau password salah" });
+      }
+
+      const { otpCode, otpToken } = issueEmailOtp(email, purpose);
+      let mailResult;
+      try {
+        mailResult = await sendOtpEmail({ to: email, otpCode, purpose });
+      } catch (e) {
+        console.error("Send OTP email error:", e.message);
+        return res.status(502).json({ error: "Gagal mengirim email OTP. Silakan coba lagi." });
+      }
+
+      res.json({
+        message: "Kode OTP telah dikirim ke email kamu",
+        otp_token: otpToken,
+        ...(process.env.NODE_ENV !== "production" && !mailResult.sent ? { dev_otp: otpCode } : {}),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // ── POST /api/auth/register ───────────────────────────────────────────────
 router.post(
   "/register",
   authLimiter(),
   [
-    body("email").isEmail().normalizeEmail().withMessage("Email tidak valid"),
+    body("email")
+      .isEmail()
+      .normalizeEmail()
+      .withMessage("Email tidak valid")
+      .bail()
+      .custom((v) => isAllowedCampusEmail(v))
+      .withMessage(CAMPUS_EMAIL_ERROR),
     body("password")
       .isString()
       .isLength({ min: 8 })
@@ -144,7 +317,11 @@ router.post(
   async (req, res, next) => {
     if (!validate(req, res)) return;
     try {
-      const { email, password, full_name, prodi, angkatan, kota } = req.body;
+      const { email, password, full_name, prodi, angkatan, kota, otp, otp_token } = req.body;
+
+      if (!verifyEmailOtp({ email, otp, otpToken: otp_token, purpose: "register" })) {
+        return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
+      }
 
       const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
@@ -189,7 +366,13 @@ router.post(
   "/login",
   authLimiter(),
   [
-    body("email").isEmail().normalizeEmail().withMessage("Email tidak valid"),
+    body("email")
+      .isEmail()
+      .normalizeEmail()
+      .withMessage("Email tidak valid")
+      .bail()
+      .custom((v) => isAllowedCampusEmail(v))
+      .withMessage(CAMPUS_EMAIL_ERROR),
     body("password").isString().notEmpty().withMessage("Password wajib diisi"),
   ],
   async (req, res, next) => {
@@ -348,6 +531,9 @@ router.post(
 
       const sub = String(claims.sub);
       const email = normalizeEmail(claims.email);
+      if (!isAllowedCampusEmail(email)) {
+        return res.status(403).json({ error: CAMPUS_EMAIL_ERROR });
+      }
       let user = await findUserByGoogleOrEmail(sub, email);
       let profile;
       const extra = {};
@@ -522,7 +708,15 @@ router.post(
 router.post(
   "/forgot-password",
   otpLimiter(10),
-  [body("email").isEmail().normalizeEmail().withMessage("Email tidak valid")],
+  [
+    body("email")
+      .isEmail()
+      .normalizeEmail()
+      .withMessage("Email tidak valid")
+      .bail()
+      .custom((v) => isAllowedCampusEmail(v))
+      .withMessage(CAMPUS_EMAIL_ERROR),
+  ],
   async (req, res, next) => {
     if (!validate(req, res)) return;
     try {
@@ -559,33 +753,15 @@ router.post(
       });
       if (insErr) throw insErr;
 
-      // Optional email dispatch via Resend if configured
-      if (process.env.RESEND_API_KEY) {
-        try {
-          const r = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: process.env.EMAIL_FROM || "Unitas <noreply@unitas.app>",
-              to: [user.email],
-              subject: "Kode Reset Password Unitas",
-              html: `<p>Kode OTP reset password kamu adalah: <strong>${otpCode}</strong>. Berlaku selama 15 menit.</p>`,
-            }),
-            signal: AbortSignal.timeout(8000),
-          });
-          if (!r.ok) console.error("Resend email error: HTTP", r.status);
-        } catch (e) {
-          console.error("Resend email error:", e.message);
-        }
-      } else if (process.env.NODE_ENV !== "production") {
-        console.log(`[Unitas OTP] ${user.email}: ${otpCode}`);
+      let mailResult = { sent: false };
+      try {
+        mailResult = await sendOtpEmail({ to: user.email, otpCode, purpose: "reset" });
+      } catch (e) {
+        console.error("Send OTP email error:", e.message);
       }
 
       const payload = { message: "Jika email terdaftar, kode OTP telah dikirim" };
-      if (process.env.NODE_ENV !== "production" && !process.env.RESEND_API_KEY) {
+      if (process.env.NODE_ENV !== "production" && !mailResult.sent) {
         payload.dev_otp = otpCode;
       }
       res.json(payload);
@@ -600,7 +776,13 @@ router.post(
   "/reset-password",
   otpLimiter(15),
   [
-    body("email").isEmail().normalizeEmail().withMessage("Email tidak valid"),
+    body("email")
+      .isEmail()
+      .normalizeEmail()
+      .withMessage("Email tidak valid")
+      .bail()
+      .custom((v) => isAllowedCampusEmail(v))
+      .withMessage(CAMPUS_EMAIL_ERROR),
     body("otp").notEmpty().withMessage("Kode OTP wajib diisi"),
     body("new_password")
       .isString()
