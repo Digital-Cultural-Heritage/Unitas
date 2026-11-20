@@ -1,0 +1,23 @@
+# Root-level .gitignore — Monorepo D:\Unitas
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+
+# ── Secrets — jangan pernah commit file .env! ─────────────────────────────
+**/.env
+**/.env.local
+**/.env.*.local
+**/key.properties
+**/*.jks
+**/*.keystore
+

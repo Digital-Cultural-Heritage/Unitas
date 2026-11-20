@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,7 +7,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'core/api/api_client.dart';
 import 'core/api/auth_service.dart';
+import 'core/api/messages_service.dart';
+import 'core/crypto/e2ee_service.dart';
 import 'core/theme/colors.dart';
+import 'core/security/security_service.dart';
+import 'core/security/security_block_screen.dart';
 import 'screens/directory_screen.dart';
 import 'screens/events_screen.dart';
 import 'screens/home_screen.dart';
@@ -25,6 +30,34 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.dark,
     ));
   } catch (_) {}
+
+  // ── Native Security Gate ────────────────────────────────────────────────
+  // 1. Root Detection: Berjalan di semua mode
+  final isRooted = await SecurityService.isRooted();
+  if (isRooted) {
+    runApp(const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: SecurityBlockScreen(
+        message:
+            'Perangkat terdeteksi menggunakan akses root.\n\n'
+            'Aplikasi Unitas tidak dapat digunakan pada perangkat yang telah '
+            'dimodifikasi demi menjaga keamanan akun dan data alumni.',
+      ),
+    ));
+    return;
+  }
+
+  // 2. Anti-Debug: Aktif di mode Release agar tidak konflik saat "flutter run"
+  if (kReleaseMode) {
+    SecurityService.listenForThreats((reason) {
+      runApp(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: SecurityBlockScreen(message: reason),
+      ));
+    });
+    await SecurityService.initAntiDebug();
+  }
+
   runApp(const UnitasApp());
 }
 
@@ -61,6 +94,29 @@ class _UnitasAppState extends State<UnitasApp> {
   Future<void> _checkAuth() async {
     final loggedIn = await AuthService.restoreSession();
     if (mounted) setState(() => _loggedIn = loggedIn);
+    if (loggedIn) await _initE2eeKeys();
+  }
+
+  /// Inisialisasi E2EE keys setelah login berhasil.
+  /// Generate keypair jika belum ada, lalu upload ke server.
+  Future<void> _initE2eeKeys() async {
+    try {
+      // Generate identity keys jika belum pernah ada
+      if (!await E2eeService.hasIdentityKeys()) {
+        await E2eeService.generateIdentityKeys();
+      }
+      // Upload ke server jika belum terdaftar
+      if (!await E2eeService.isRegisteredToServer()) {
+        final bundle = await E2eeService.getPublicKeyBundle();
+        if (bundle != null) {
+          final ok = await MessagesService.registerKeys(bundle);
+          if (ok) await E2eeService.markKeysRegistered();
+        }
+      }
+    } catch (e) {
+      // E2EE init gagal: tidak crash app, chat tetap bisa pakai plaintext fallback
+      debugPrint('[E2EE] Init error: $e');
+    }
   }
 
   void _onLoginSuccess() {
@@ -70,6 +126,8 @@ class _UnitasAppState extends State<UnitasApp> {
       _sessionEpoch++;
       _loggedIn = true;
     });
+    // Inisialisasi E2EE keys setelah login berhasil
+    _initE2eeKeys();
   }
 
   void _onLogout() {

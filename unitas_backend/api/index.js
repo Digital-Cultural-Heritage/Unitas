@@ -66,6 +66,7 @@ if (missingEnv.length > 0) {
   app.use("/api/upload",        lazyRoute(() => require("../src/routes/upload")));
   app.use("/api/stats",         lazyRoute(() => require("../src/routes/stats")));
   app.use("/api/notifications", lazyRoute(() => require("../src/routes/notifications")));
+  app.use("/api/keys",          lazyRoute(() => require("../src/routes/keys")));
   app.use("/api/messages",      lazyRoute(() => require("../src/routes/messages")));
 }
 

@@ -9,6 +9,8 @@ const router = express.Router();
 router.param("peerId", uuidParam);
 
 const MAX_MESSAGE_LENGTH = 4000;
+// Panjang maksimal ciphertext base64 (≈ plaintext 4000 char + overhead enkripsi)
+const MAX_CIPHERTEXT_LENGTH = 8000;
 
 // Helper: verify two users are connected (accepted)
 async function areConnected(userA, userB) {
@@ -54,7 +56,7 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
     const [recentRes, unreadRes] = await Promise.all([
       supabase
         .from("messages")
-        .select("id, sender_id, receiver_id, content, is_read, created_at")
+        .select("id, sender_id, receiver_id, content, ciphertext, is_read, created_at")
         .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
         .order("created_at", { ascending: false })
         .limit(500),
@@ -85,9 +87,13 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
 
     const conversations = peers.map((peer) => {
       const lastMsg = latestByPeer[peer.id] || null;
+      // Jika pesan terakhir adalah E2EE (ada ciphertext), tampilkan label terenkripsi
+      const lastMsgPreview = lastMsg
+        ? (lastMsg.ciphertext ? "🔒 Pesan terenkripsi" : lastMsg.content)
+        : null;
       return {
         peer,
-        last_message: lastMsg ? lastMsg.content : null,
+        last_message: lastMsgPreview,
         last_message_at: lastMsg ? lastMsg.created_at : null,
         unread_count: unreadByPeer[peer.id] || 0,
       };
@@ -128,7 +134,7 @@ router.get("/:peerId", requireAuth, async (req, res, next) => {
     // getting stuck on the oldest 100.
     const { data, error } = await supabase
       .from("messages")
-      .select("id, sender_id, receiver_id, content, is_read, created_at")
+      .select("id, sender_id, receiver_id, content, ciphertext, nonce, sender_ratchet_public_key, ephemeral_public_key, message_number, previous_chain_length, is_read, created_at")
       .or(
         `and(sender_id.eq.${userId},receiver_id.eq.${peerId}),and(sender_id.eq.${peerId},receiver_id.eq.${userId})`
       )
@@ -162,19 +168,36 @@ router.post(
   "/:peerId",
   requireAuth,
   [
-    body("content")
+    // E2EE mode: ciphertext wajib ada
+    // Legacy mode: content wajib ada
+    // Setidaknya satu dari keduanya harus ada
+    body("ciphertext")
+      .optional()
       .isString()
-      .withMessage("Pesan tidak boleh kosong")
-      .bail()
+      .isLength({ max: MAX_CIPHERTEXT_LENGTH })
+      .withMessage(`Ciphertext maksimal ${MAX_CIPHERTEXT_LENGTH} karakter`),
+    body("content")
+      .optional()
+      .isString()
       .trim()
-      .notEmpty()
-      .withMessage("Pesan tidak boleh kosong")
       .isLength({ max: MAX_MESSAGE_LENGTH })
       .withMessage(`Pesan maksimal ${MAX_MESSAGE_LENGTH} karakter`),
+    body("nonce").optional().isString(),
+    body("sender_ratchet_public_key").optional().isString(),
+    body("ephemeral_public_key").optional().isString(),
+    body("message_number").optional().isInt({ min: 0 }),
+    body("previous_chain_length").optional().isInt({ min: 0 }),
   ],
   async (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { content, ciphertext, nonce, sender_ratchet_public_key, ephemeral_public_key, message_number, previous_chain_length } = req.body;
+
+    // Harus ada salah satu: ciphertext (E2EE) atau content (legacy)
+    if (!ciphertext && !content) {
+      return res.status(400).json({ errors: [{ msg: "Pesan tidak boleh kosong" }] });
+    }
 
     try {
       const userId = req.user.userId;
@@ -189,14 +212,30 @@ router.post(
         return res.status(403).json({ error: "Hanya bisa mengirim pesan ke alumni yang sudah terkoneksi" });
       }
 
+      // Bangun objek insert — backend hanya relay, tidak melihat isi pesan
+      const insertPayload = {
+        sender_id: userId,
+        receiver_id: peerId,
+      };
+
+      if (ciphertext) {
+        // Mode E2EE
+        insertPayload.ciphertext = ciphertext;
+        insertPayload.nonce = nonce;
+        insertPayload.sender_ratchet_public_key = sender_ratchet_public_key;
+        insertPayload.ephemeral_public_key = ephemeral_public_key || null;
+        insertPayload.message_number = message_number ?? 0;
+        insertPayload.previous_chain_length = previous_chain_length ?? 0;
+        // content tetap null — tidak ada plaintext
+      } else {
+        // Legacy mode (backward compat untuk pesan lama / testing)
+        insertPayload.content = content;
+      }
+
       const { data, error } = await supabase
         .from("messages")
-        .insert({
-          sender_id: userId,
-          receiver_id: peerId,
-          content: req.body.content,
-        })
-        .select("id, sender_id, receiver_id, content, is_read, created_at")
+        .insert(insertPayload)
+        .select("id, sender_id, receiver_id, content, ciphertext, nonce, sender_ratchet_public_key, ephemeral_public_key, message_number, previous_chain_length, is_read, created_at")
         .single();
       if (error) {
         if (isFkViolation(error)) return res.status(404).json({ error: "Pengguna tidak ditemukan" });
