@@ -56,11 +56,7 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
     const [recentRes, unreadRes, keysRes] = await Promise.all([
       supabase
         .from("messages")
-<<<<<<< Updated upstream
-        .select("id, sender_id, receiver_id, content, ciphertext, is_read, created_at")
-=======
         .select("id, sender_id, receiver_id, content, ciphertext, nonce, is_read, created_at")
->>>>>>> Stashed changes
         .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
         .order("created_at", { ascending: false })
         .limit(500),
@@ -105,10 +101,6 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
         ? (lastMsg.ciphertext ? "🔒 Pesan terenkripsi" : lastMsg.content)
         : null;
       return {
-<<<<<<< Updated upstream
-        peer,
-        last_message: lastMsgPreview,
-=======
         peer: {
           ...peer,
           identity_public_key: keysByPeer[peer.id] || null,
@@ -116,7 +108,6 @@ router.get("/conversations", requireAuth, async (req, res, next) => {
         last_message: lastMsg ? (lastMsg.content || "🔒 Pesan terenkripsi") : null,
         last_message_ciphertext: lastMsg ? lastMsg.ciphertext : null,
         last_message_nonce: lastMsg ? lastMsg.nonce : null,
->>>>>>> Stashed changes
         last_message_at: lastMsg ? lastMsg.created_at : null,
         unread_count: unreadByPeer[peer.id] || 0,
       };

@@ -98,21 +98,6 @@ class _UnitasAppState extends State<UnitasApp> {
   }
 
   /// Inisialisasi E2EE keys setelah login berhasil.
-<<<<<<< Updated upstream
-  /// Generate keypair jika belum ada, lalu upload ke server.
-  Future<void> _initE2eeKeys() async {
-    try {
-      // Generate identity keys jika belum pernah ada
-      if (!await E2eeService.hasIdentityKeys()) {
-        await E2eeService.generateIdentityKeys();
-      }
-      // Upload ke server jika belum terdaftar
-      if (!await E2eeService.isRegisteredToServer()) {
-        final bundle = await E2eeService.getPublicKeyBundle();
-        if (bundle != null) {
-          final ok = await MessagesService.registerKeys(bundle);
-          if (ok) await E2eeService.markKeysRegistered();
-=======
   /// Generate keypair jika belum ada untuk user ini, lalu upload ke server.
   Future<void> _initE2eeKeys() async {
     try {
@@ -130,7 +115,6 @@ class _UnitasAppState extends State<UnitasApp> {
         if (bundle != null) {
           final ok = await MessagesService.registerKeys(bundle);
           if (ok) await E2eeService.markKeysRegistered(userId);
->>>>>>> Stashed changes
         }
       }
     } catch (e) {
