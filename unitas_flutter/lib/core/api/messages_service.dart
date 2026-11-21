@@ -12,6 +12,12 @@ class MessagesService {
     return asJsonMapList(res);
   }
 
+  /// Ambil riwayat pesan beserta public key terbaru milik lawan bicara
+  static Future<Map<String, dynamic>> getMessagesWithMeta(String peerId) async {
+    final res = await ApiClient.get('/api/messages/$peerId');
+    return asJsonMap(res);
+  }
+
   /// Kirim pesan plaintext (legacy/fallback — tidak terenkripsi)
   static Future<Map<String, dynamic>> sendMessage(String peerId, String content) async {
     final res = await ApiClient.post('/api/messages/$peerId', body: {'content': content});
