@@ -1,8 +1,7 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, resolveOptionalViewerId } = require("../middleware/auth");
 const { createNotification } = require("../lib/notifications");
-const { verifyAccessToken } = require("../lib/jwt");
 const {
   isUuid,
   uuidParam,
@@ -16,17 +15,6 @@ const {
 const router = express.Router();
 
 router.param("id", uuidParam);
-
-function optionalUserId(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-  try {
-    const decoded = verifyAccessToken(authHeader.split(" ")[1]);
-    return isUuid(decoded?.userId) ? decoded.userId : null;
-  } catch (_) {
-    return null;
-  }
-}
 
 async function getActorName(userId) {
   const { data } = await supabase
@@ -259,62 +247,116 @@ router.put("/requests/:id", requireAuth, async (req, res, next) => {
 // -- GET /api/users - Direktori alumni ------------------------------------
 router.get("/", async (req, res, next) => {
   try {
-    const { q = "", prodi, kota, is_online } = req.query;
+    const currentUserId = resolveOptionalViewerId(req, res);
+    if (currentUserId === undefined) return;
+
+    const { q = "", prodi, kota, exclude_kota, connected, is_online } = req.query;
     const { page, limit, offset, to } = parsePagination(req.query);
+    const connectedOnly = connected === "true";
+    const emptyPage = () => ({
+      data: [],
+      total: 0,
+      page,
+      limit,
+      total_pages: 1,
+      has_next: false,
+      has_prev: false,
+    });
+
+    let connectedIds = null;
+    if (connectedOnly) {
+      if (!currentUserId) return res.json(emptyPage());
+      const { data: conns, error: connErr } = await supabase
+        .from("alumni_connections")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`);
+      if (connErr) throw connErr;
+      connectedIds = [
+        ...new Set(
+          (conns || [])
+            .map((c) => (c.requester_id === currentUserId ? c.addressee_id : c.requester_id))
+            .filter(isUuid)
+        ),
+      ];
+      if (connectedIds.length === 0) return res.json(emptyPage());
+    }
 
     let dbQuery = supabase
       .from("user_profiles")
       .select(
-        "user_id, full_name, initials, avatar_url, prodi, angkatan, kota, pekerjaan, perusahaan, is_online, points",
+        "user_id, full_name, initials, avatar_url, bio, prodi, angkatan, kota, pekerjaan, perusahaan, is_online, points",
         { count: "exact" }
       )
       .order("points", { ascending: false })
       .order("user_id", { ascending: true })
       .range(offset, to);
 
+    if (connectedIds) {
+      dbQuery = dbQuery.in("user_id", connectedIds);
+    }
+
     const cleanQ = sanitizeSearch(q);
     if (cleanQ) {
       dbQuery = dbQuery.or(`full_name.ilike.%${cleanQ}%,prodi.ilike.%${cleanQ}%,perusahaan.ilike.%${cleanQ}%`);
     }
     if (typeof prodi === "string" && prodi.trim()) dbQuery = dbQuery.eq("prodi", prodi.trim());
-    if (typeof kota === "string" && kota.trim()) dbQuery = dbQuery.eq("kota", kota.trim());
+    if (typeof kota === "string" && kota.trim()) {
+      dbQuery = dbQuery.eq("kota", kota.trim());
+    } else {
+      const cleanExcludeKota = sanitizeSearch(exclude_kota);
+      if (cleanExcludeKota) {
+        dbQuery = dbQuery.or(`kota.is.null,kota.neq.${cleanExcludeKota}`);
+      }
+    }
     if (is_online === "true") dbQuery = dbQuery.eq("is_online", true);
 
     const { data, count, error } = await dbQuery;
     if (error) throw error;
 
     const statusMap = {};
-    const currentUserId = optionalUserId(req);
-    const pageUserIds = (data || []).map((r) => r.user_id).filter(isUuid);
-
-    if (currentUserId && pageUserIds.length > 0) {
-      const idList = pageUserIds.join(",");
-      const { data: conns, error: connErr } = await supabase
-        .from("alumni_connections")
-        .select("requester_id, addressee_id, status")
-        .in("status", ["accepted", "pending"])
-        .or(
-          `and(requester_id.eq.${currentUserId},addressee_id.in.(${idList})),` +
-          `and(addressee_id.eq.${currentUserId},requester_id.in.(${idList}))`
-        );
-      if (!connErr && conns) {
-        for (const c of conns) {
-          const otherId = c.requester_id === currentUserId ? c.addressee_id : c.requester_id;
-          if (c.status === "accepted") {
-            statusMap[otherId] = "accepted";
-          } else if (c.status === "pending") {
-            statusMap[otherId] = c.requester_id === currentUserId ? "pending" : "incoming";
+    const rows = data || [];
+    if (!connectedOnly) {
+      const pageUserIds = rows.map((r) => r.user_id).filter(isUuid);
+      if (currentUserId && pageUserIds.length > 0) {
+        const idList = pageUserIds.join(",");
+        const { data: conns, error: connErr } = await supabase
+          .from("alumni_connections")
+          .select("requester_id, addressee_id, status")
+          .in("status", ["accepted", "pending"])
+          .or(
+            `and(requester_id.eq.${currentUserId},addressee_id.in.(${idList})),` +
+            `and(addressee_id.eq.${currentUserId},requester_id.in.(${idList}))`
+          );
+        if (!connErr && conns) {
+          for (const c of conns) {
+            const otherId = c.requester_id === currentUserId ? c.addressee_id : c.requester_id;
+            if (c.status === "accepted") {
+              statusMap[otherId] = "accepted";
+            } else if (c.status === "pending") {
+              statusMap[otherId] = c.requester_id === currentUserId ? "pending" : "incoming";
+            }
           }
         }
       }
     }
 
-    const enriched = (data || []).map((row) => ({
+    const enriched = rows.map((row) => ({
       ...row,
-      connection_status: statusMap[row.user_id] || "none",
+      connection_status: connectedOnly ? "accepted" : statusMap[row.user_id] || "none",
     }));
 
-    res.json({ data: enriched, total: count, page, limit });
+    const total = count || 0;
+    const total_pages = Math.max(1, Math.ceil(total / limit));
+    res.json({
+      data: enriched,
+      total,
+      page,
+      limit,
+      total_pages,
+      has_next: page < total_pages,
+      has_prev: page > 1,
+    });
   } catch (err) {
     next(err);
   }
@@ -323,6 +365,9 @@ router.get("/", async (req, res, next) => {
 // -- GET /api/users/:id ---------------------------------------------------
 router.get("/:id", async (req, res, next) => {
   try {
+    const currentUserId = resolveOptionalViewerId(req, res);
+    if (currentUserId === undefined) return;
+
     const { data, error } = await supabase
       .from("user_profiles")
       .select("*")
@@ -332,7 +377,6 @@ router.get("/:id", async (req, res, next) => {
     if (!data) return res.status(404).json({ error: "Alumni tidak ditemukan" });
 
     let connection_status = "none";
-    const currentUserId = optionalUserId(req);
     if (currentUserId && currentUserId !== req.params.id) {
       const { data: conn, error: connErr } = await supabase
         .from("alumni_connections")

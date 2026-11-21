@@ -2,11 +2,144 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
+import '../core/api/auth_service.dart';
 import '../core/api/users_service.dart';
 import '../core/api/api_client.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import 'chat_room_screen.dart';
+
+/// Menghasilkan daftar nomor halaman (maks 7 slot) dengan `null` sebagai elipsis (`…`).
+List<int?> buildVisiblePageNumbers(int currentPage, int totalPages) {
+  if (totalPages <= 1) return const [1];
+  if (totalPages <= 7) return List<int?>.generate(totalPages, (i) => i + 1);
+
+  final current = currentPage.clamp(1, totalPages);
+  if (current <= 3) {
+    return [1, 2, 3, 4, null, totalPages];
+  }
+  if (current >= totalPages - 2) {
+    return [1, null, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+  return [1, null, current - 1, current, current + 1, null, totalPages];
+}
+
+class DirectoryPaginationBar extends StatelessWidget {
+  final int currentPage;
+  final int totalPages;
+  final int totalItems;
+  final int pageSize;
+  final int currentCount;
+  final bool loading;
+  final ValueChanged<int> onPageChanged;
+
+  const DirectoryPaginationBar({
+    super.key,
+    required this.currentPage,
+    required this.totalPages,
+    required this.totalItems,
+    required this.pageSize,
+    required this.currentCount,
+    required this.loading,
+    required this.onPageChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final startItem =
+        totalItems == 0 || currentCount == 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    final endItem = totalItems == 0 || currentCount == 0
+        ? 0
+        : (startItem + currentCount - 1).clamp(startItem, totalItems);
+    final pages = buildVisiblePageNumbers(currentPage, totalPages);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Menampilkan $startItem–$endItem dari $totalItems alumni',
+            style: caption.copyWith(color: dim1),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              IconButton(
+                tooltip: 'Halaman sebelumnya',
+                icon: const Icon(Icons.chevron_left, size: 20),
+                color: brandNavy,
+                disabledColor: dim3,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                padding: EdgeInsets.zero,
+                onPressed: loading || currentPage <= 1
+                    ? null
+                    : () => onPageChanged(currentPage - 1),
+              ),
+              for (final p in pages)
+                if (p == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('…', style: caption.copyWith(color: dim2)),
+                  )
+                else
+                  _buildPagePill(p),
+              IconButton(
+                tooltip: 'Halaman berikutnya',
+                icon: const Icon(Icons.chevron_right, size: 20),
+                color: brandNavy,
+                disabledColor: dim3,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                padding: EdgeInsets.zero,
+                onPressed: loading || currentPage >= totalPages
+                    ? null
+                    : () => onPageChanged(currentPage + 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPagePill(int page) {
+    final active = page == currentPage;
+    return Material(
+      color: active ? brandNavy : card,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: loading || active ? null : () => onPageChanged(page),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: active ? brandNavy : borderColor),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            '$page',
+            style: caption.copyWith(
+              color: active ? Colors.white : dim1,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class DirectoryScreen extends StatefulWidget {
   final int refreshTrigger;
@@ -16,6 +149,8 @@ class DirectoryScreen extends StatefulWidget {
 }
 
 class _DirectoryScreenState extends State<DirectoryScreen> {
+  static const int _pageSize = 15;
+
   final _searchCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   Timer? _searchDebounce;
@@ -24,9 +159,9 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   String _filter = 'Semua';
   List<Map<String, dynamic>> _alumni = [];
   bool _loading = true;
-  bool _loadingMore = false;
-  bool _hasMore = true;
   int _page = 1;
+  int _total = 0;
+  int _totalPages = 1;
   String? _error;
   String? _currentUserId;
   final Map<String, String> _connectionStatus = {};
@@ -37,29 +172,20 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
   @override
   void initState() {
     super.initState();
-    _scrollCtrl.addListener(_onScroll);
     _load();
-  }
-
-  void _onScroll() {
-    if (!_scrollCtrl.hasClients) return;
-    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 250) {
-      _loadMore();
-    }
   }
 
   @override
   void didUpdateWidget(covariant DirectoryScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.refreshTrigger != oldWidget.refreshTrigger) {
-      _load();
+      _load(page: _page);
     }
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
-    _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
@@ -73,27 +199,39 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     });
   }
 
-  Future<void> _load() async {
+  Future<void> _load({int page = 1}) async {
     final seq = ++_loadSeq;
+    final targetPage = page < 1 ? 1 : page;
     setState(() {
       _loading = true;
-      _loadingMore = false;
       _error = null;
-      _page = 1;
-      _hasMore = true;
     });
     try {
       final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
+      final excludeKota = _filter == 'Lainnya' ? 'Jakarta' : null;
+      final connectedOnly = _filter == 'Terhubung';
+
+      if (_currentUserId == null) {
+        final stored = await AuthService.getStoredUser();
+        final storedId = (stored?['user_id'] ?? stored?['id'])?.toString();
+        if (storedId != null && storedId.isNotEmpty) {
+          _currentUserId = storedId;
+        }
+      }
+
       final dirFuture = UsersService.getDirectory(
         q: _q,
         kota: kota,
-        page: 1,
+        excludeKota: excludeKota,
+        connectedOnly: connectedOnly,
+        page: targetPage,
+        limit: _pageSize,
       );
       final meFuture = _currentUserId == null
           ? UsersService.getMe().catchError((_) => <String, dynamic>{})
           : null;
 
-      final raw = await dirFuture;
+      final result = await dirFuture;
       if (meFuture != null) {
         final profile = await meFuture;
         if (profile.isNotEmpty) {
@@ -103,18 +241,21 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
 
       if (!mounted || seq != _loadSeq) return;
 
-      var data = raw;
-      if (_filter == 'Terhubung') {
-        data = raw.where((a) => a['connection_status'] == 'accepted').toList();
-      } else if (_filter == 'Lainnya') {
-        // Filter "Lainnya" = bukan Jakarta
-        data = raw.where((a) => (a['kota'] ?? '').toString() != 'Jakarta').toList();
+      if (result.items.isEmpty &&
+          targetPage > 1 &&
+          result.total > 0 &&
+          result.totalPages < targetPage) {
+        await _load(page: result.totalPages);
+        return;
       }
 
+      final prevPage = _page;
       setState(() {
-        _alumni = data;
-        _hasMore = raw.length >= 30;
-        for (final a in data) {
+        _alumni = result.items;
+        _page = result.page;
+        _total = result.total;
+        _totalPages = result.totalPages;
+        for (final a in result.items) {
           final uid = a['user_id']?.toString() ?? '';
           if (uid.isNotEmpty) {
             _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
@@ -122,6 +263,9 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
         }
         _loading = false;
       });
+      if (_scrollCtrl.hasClients && result.page != prevPage) {
+        _scrollCtrl.jumpTo(0);
+      }
     } on ApiException catch (e) {
       if (mounted && seq == _loadSeq) {
         setState(() {
@@ -139,36 +283,9 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     }
   }
 
-  Future<void> _loadMore() async {
-    if (_loadingMore || !_hasMore || _loading) return;
-    final seq = _loadSeq;
-    setState(() => _loadingMore = true);
-    try {
-      final nextPage = _page + 1;
-      final kota = _filter == 'Jakarta' ? 'Jakarta' : null;
-      final raw = await UsersService.getDirectory(q: _q, kota: kota, page: nextPage);
-      if (!mounted || seq != _loadSeq) return;
-      var data = raw;
-      if (_filter == 'Terhubung') {
-        data = raw.where((a) => a['connection_status'] == 'accepted').toList();
-      } else if (_filter == 'Lainnya') {
-        data = raw.where((a) => (a['kota'] ?? '').toString() != 'Jakarta').toList();
-      }
-      setState(() {
-        _alumni = [..._alumni, ...data];
-        _page = nextPage;
-        _hasMore = raw.length >= 30;
-        for (final a in data) {
-          final uid = a['user_id']?.toString() ?? '';
-          if (uid.isNotEmpty) {
-            _connectionStatus[uid] = a['connection_status']?.toString() ?? 'none';
-          }
-        }
-        _loadingMore = false;
-      });
-    } catch (_) {
-      if (mounted && seq == _loadSeq) setState(() => _loadingMore = false);
-    }
+  void _goToPage(int target) {
+    if (_loading || target == _page || target < 1 || target > _totalPages) return;
+    _load(page: target);
   }
 
   static const List<Color> _colors = [
@@ -516,7 +633,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     final jobLine = '${p['pekerjaan'] ?? ''} · ${p['perusahaan'] ?? ''}'
         .trim()
         .replaceAll(RegExp(r'^\s*·\s*|\s*·\s*$'), '');
-    final avatarColor = _colorFor(i);
+    final avatarColor = _colorFor((_page - 1) * _pageSize + i);
 
     return RepaintBoundary(
       child: Container(
@@ -614,7 +731,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
           child: RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: () => _load(page: _page),
             color: brandNavy,
             child: CustomScrollView(
               controller: _scrollCtrl,
@@ -628,7 +745,14 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('${_alumni.isNotEmpty ? _alumni.length.toString() : "—"} alumni ditemukan', style: caption),
+                          Text(
+                            _loading && _total == 0
+                                ? '— alumni ditemukan'
+                                : _totalPages > 1
+                                    ? '$_total alumni ditemukan · Hal. $_page/$_totalPages'
+                                    : '$_total alumni ditemukan',
+                            style: caption,
+                          ),
                           Text('Direktori Alumni', style: heading),
                         ]),
                       ),
@@ -775,11 +899,16 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
                       itemBuilder: (_, i) => _buildAlumniCard(i, _alumni[i]),
                     ),
                   ),
-                if (_loadingMore)
-                  const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                if (!_loading && _error == null && _alumni.isNotEmpty && _totalPages > 1)
+                  SliverToBoxAdapter(
+                    child: DirectoryPaginationBar(
+                      currentPage: _page,
+                      totalPages: _totalPages,
+                      totalItems: _total,
+                      pageSize: _pageSize,
+                      currentCount: _alumni.length,
+                      loading: _loading,
+                      onPageChanged: _goToPage,
                     ),
                   ),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),

@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:unitas_flutter/core/api/api_client.dart';
 import 'package:unitas_flutter/core/api/auth_service.dart';
+import 'package:unitas_flutter/core/api/posts_service.dart';
 import 'package:unitas_flutter/core/theme/colors.dart';
 import 'package:unitas_flutter/core/utils/image_validator.dart';
 import 'package:unitas_flutter/core/utils/json_utils.dart';
+import 'package:unitas_flutter/screens/directory_screen.dart';
 import 'package:unitas_flutter/screens/login_screen.dart';
 import 'package:unitas_flutter/screens/profile_screen.dart';
 import 'package:unitas_flutter/widgets/avatar.dart';
@@ -52,10 +55,11 @@ void main() {
     expect(AuthService.isAllowedUnudEmail('outsider@gmail.com'), isFalse);
   });
 
-  testWidgets('showSetPasswordSheet validates, shows server errors for retry, and handles skip', (WidgetTester tester) async {
+  testWidgets('showSetPasswordSheet enforces mandatory setup post-login and optional mode in settings', (WidgetTester tester) async {
     String? savedPassword;
     bool? sheetResult;
     var shouldFailSave = false;
+    var postLoginPrompt = true;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -67,7 +71,7 @@ void main() {
                   sheetResult = await showSetPasswordSheet(
                     context: context,
                     email: 'siti@student.unud.ac.id',
-                    isPostLoginPrompt: true,
+                    isPostLoginPrompt: postLoginPrompt,
                     onSave: (pw) async {
                       if (shouldFailSave) {
                         throw const ApiException('Gagal menyimpan di server', 500);
@@ -89,8 +93,15 @@ void main() {
 
     expect(find.text('Buat Kata Sandi'), findsOneWidget);
     expect(find.textContaining('siti@student.unud.ac.id'), findsOneWidget);
+    expect(find.textContaining('wajib membuat kata sandi'), findsOneWidget);
     expect(find.text('Simpan Kata Sandi'), findsOneWidget);
-    expect(find.text('Lewati dulu'), findsOneWidget);
+    expect(find.text('Lewati dulu'), findsNothing);
+    expect(find.text('Keluar'), findsOneWidget);
+
+    // Hardware Back / Navigator.maybePop cannot dismiss mandatory post-login prompt
+    await Navigator.maybePop(tester.element(find.text('Buat Kata Sandi')));
+    await tester.pumpAndSettle();
+    expect(find.text('Buat Kata Sandi'), findsOneWidget);
 
     // Rejects short password & mismatched confirmation
     await tester.enterText(find.byType(TextFormField).at(0), '123');
@@ -123,13 +134,28 @@ void main() {
     expect(sheetResult, isTrue);
     expect(find.text('Buat Kata Sandi'), findsNothing);
 
-    // Tapping "Lewati dulu" closes with false without calling onSave
+    // Tapping "Keluar" in mandatory mode closes with false without calling onSave
     savedPassword = null;
     sheetResult = null;
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Lewati dulu'));
-    await tester.tap(find.text('Lewati dulu'));
+    await tester.ensureVisible(find.text('Keluar'));
+    await tester.tap(find.text('Keluar'));
+    await tester.pumpAndSettle();
+
+    expect(savedPassword, isNull);
+    expect(sheetResult, isFalse);
+
+    // Optional Profile Settings mode shows "Batal" and closes with false
+    postLoginPrompt = false;
+    sheetResult = null;
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Batal'), findsOneWidget);
+    expect(find.text('Keluar'), findsNothing);
+    await tester.ensureVisible(find.text('Batal'));
+    await tester.tap(find.text('Batal'));
     await tester.pumpAndSettle();
 
     expect(savedPassword, isNull);
@@ -256,6 +282,176 @@ void main() {
       expect(await ApiClient.getToken(), isNull);
       expect(await ApiClient.getRefreshToken(), isNull);
       expect(await ApiClient.getStoredUserJson(), isNull);
+    });
+  });
+
+  group('PostLikeSync', () {
+    test('rapid double-tap updates optimistically and sends zero network calls', () async {
+      var calls = 0;
+      final emitted = <PostLikeSnapshot>[];
+      final sync = PostLikeSync(
+        debounceDuration: const Duration(milliseconds: 25),
+        sendLike: (id, liked) async {
+          calls++;
+          return PostLikeResult(liked: liked, likesCount: liked ? 6 : 5);
+        },
+      );
+      sync.addListener((_, snap) => emitted.add(snap));
+
+      sync.toggle(postId: 'p1', currentLiked: false, currentCount: 5);
+      sync.toggle(postId: 'p1', currentLiked: true, currentCount: 6);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(calls, 0);
+      expect(emitted.map((s) => (s.liked, s.likesCount)).toList(), [
+        (true, 6),
+        (false, 5),
+      ]);
+      expect(sync.pendingFor('p1'), isNull);
+      sync.clear();
+    });
+
+    test('tap while in flight updates optimistically and reconciles with one follow-up call', () async {
+      final c1 = Completer<PostLikeResult>();
+      final c2 = Completer<PostLikeResult>();
+      final sent = <bool>[];
+      final emitted = <PostLikeSnapshot>[];
+      final sync = PostLikeSync(
+        debounceDuration: const Duration(seconds: 30),
+        sendLike: (id, liked) {
+          sent.add(liked);
+          return sent.length == 1 ? c1.future : c2.future;
+        },
+      );
+      sync.addListener((_, snap) => emitted.add(snap));
+
+      // Tap 1 (like) + flush starts request 1
+      sync.toggle(postId: 'p1', currentLiked: false, currentCount: 5);
+      sync.flush('p1');
+      expect(sent, [true]);
+
+      // Tap 2 (unlike) while request 1 is still in flight
+      sync.toggle(postId: 'p1', currentLiked: true, currentCount: 6);
+      expect(sent, [true]);
+      expect(emitted.last.liked, isFalse);
+      expect(emitted.last.likesCount, 5);
+
+      // Complete request 1 -> triggers reconciliation request 2 (liked: false)
+      c1.complete(const PostLikeResult(liked: true, likesCount: 6));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(sent, [true, false]);
+
+      // Complete request 2 -> settles cleanly at (false, 5)
+      c2.complete(const PostLikeResult(liked: false, likesCount: 5));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(emitted.last.liked, isFalse);
+      expect(emitted.last.likesCount, 5);
+      expect(sync.pendingFor('p1'), isNull);
+      sync.clear();
+    });
+
+    test('server failure reverts cleanly to last confirmed snapshot', () async {
+      final emitted = <PostLikeSnapshot>[];
+      final sync = PostLikeSync(
+        debounceDuration: const Duration(seconds: 30),
+        sendLike: (_, _) async => throw const ApiException('Server error', 500),
+      );
+      sync.addListener((_, snap) => emitted.add(snap));
+
+      sync.toggle(postId: 'p1', currentLiked: false, currentCount: 5);
+      sync.flush('p1');
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(emitted.map((s) => (s.liked, s.likesCount)).toList(), [
+        (true, 6),
+        (false, 5),
+      ]);
+      expect(sync.pendingFor('p1'), isNull);
+      sync.clear();
+    });
+
+    test('flush dispatches pending debounced like immediately', () async {
+      final sent = <bool>[];
+      final sync = PostLikeSync(
+        debounceDuration: const Duration(seconds: 30),
+        sendLike: (_, liked) async {
+          sent.add(liked);
+          return PostLikeResult(liked: liked, likesCount: 6);
+        },
+      );
+
+      sync.toggle(postId: 'p1', currentLiked: false, currentCount: 5);
+      expect(sent, isEmpty);
+
+      sync.flush('p1');
+      await Future<void>.delayed(Duration.zero);
+      expect(sent, [true]);
+      sync.clear();
+    });
+  });
+
+  group('Directory pagination', () {
+    test('buildVisiblePageNumbers produces compact page ranges with ellipsis', () {
+      expect(buildVisiblePageNumbers(2, 4), [1, 2, 3, 4]);
+      expect(buildVisiblePageNumbers(2, 10), [1, 2, 3, 4, null, 10]);
+      expect(buildVisiblePageNumbers(5, 10), [1, null, 4, 5, 6, null, 10]);
+      expect(buildVisiblePageNumbers(9, 10), [1, null, 7, 8, 9, 10]);
+    });
+
+    testWidgets('DirectoryPaginationBar displays item range and triggers page changes with boundary guards', (WidgetTester tester) async {
+      final tapped = <int>[];
+
+      Future<void> pumpBar(int page, int count) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: DirectoryPaginationBar(
+                currentPage: page,
+                totalPages: 5,
+                totalItems: 72,
+                pageSize: 15,
+                currentCount: count,
+                loading: false,
+                onPageChanged: tapped.add,
+              ),
+            ),
+          ),
+        );
+      }
+
+      // Page 2 of 5 -> shows 16-30, taps 4, prev (1), next (3)
+      await pumpBar(2, 15);
+      expect(find.text('Menampilkan 16–30 dari 72 alumni'), findsOneWidget);
+
+      await tester.tap(find.text('4'));
+      await tester.tap(find.byIcon(Icons.chevron_left));
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      expect(tapped, [4, 1, 3]);
+
+      // First page disables Previous button
+      tapped.clear();
+      await pumpBar(1, 15);
+      final prevFirst = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.chevron_left),
+      );
+      expect(prevFirst.onPressed, isNull);
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      expect(tapped, [2]);
+
+      // Last page shows 61-72 and disables Next button
+      tapped.clear();
+      await pumpBar(5, 12);
+      expect(find.text('Menampilkan 61–72 dari 72 alumni'), findsOneWidget);
+      final nextLast = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.chevron_right),
+      );
+      expect(nextLast.onPressed, isNull);
+      await tester.tap(find.byIcon(Icons.chevron_left));
+      expect(tapped, [4]);
     });
   });
 }

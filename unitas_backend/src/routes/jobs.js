@@ -172,6 +172,7 @@ router.get("/saved", requireAuth, async (req, res, next) => {
 // ── GET /api/jobs/applied — Lowongan yang sudah dilamar user ─────────────
 router.get("/applied", requireAuth, async (req, res, next) => {
   try {
+    const { offset, to } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 100 });
     const { data, error } = await supabase
       .from("job_applications")
       .select(`
@@ -183,7 +184,8 @@ router.get("/applied", requireAuth, async (req, res, next) => {
         )
       `)
       .eq("applicant_id", req.user.userId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(offset, to);
     if (error) throw error;
 
     const formatted = (data || [])

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'api_client.dart';
+import 'posts_service.dart';
 
 const String _envGoogleServerClientId =
     String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
@@ -201,6 +202,7 @@ class AuthService {
     } catch (_) {
       // Tetap lanjut hapus sesi lokal meski offline.
     } finally {
+      PostsService.likeSync.clear();
       await ApiClient.clearSession();
       await signOutGoogleQuietly();
     }
@@ -208,6 +210,7 @@ class AuthService {
 
   static Future<void> deleteAccount() async {
     await ApiClient.delete('/api/users/me');
+    PostsService.likeSync.clear();
     await ApiClient.clearSession();
     await signOutGoogleQuietly();
   }
@@ -249,6 +252,10 @@ class AuthService {
 
     try {
       final me = await getMe().timeout(const Duration(seconds: 10));
+      if (me['has_password'] == false) {
+        await logout();
+        return false;
+      }
       await ApiClient.saveStoredUserJson(jsonEncode(me));
       return true;
     } on ApiException catch (e) {
@@ -267,6 +274,12 @@ class AuthService {
     String? accessToken,
     String? refreshToken,
   ) async {
+    final stored = await getStoredUser();
+    if (stored?['has_password'] == false) {
+      await ApiClient.clearSession();
+      await signOutGoogleQuietly();
+      return false;
+    }
     final accessValid =
         accessToken != null && accessToken.isNotEmpty && !_isJwtExpired(accessToken);
     final refreshValid =

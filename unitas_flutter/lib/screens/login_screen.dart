@@ -119,16 +119,18 @@ class _LoginScreenState extends State<LoginScreen> {
           email: user['email']?.toString(),
           isPostLoginPrompt: true,
         );
-        if (!mounted) return;
-        if (saved) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk dengan email.',
-              ),
-            ),
-          );
+        if (!saved) {
+          await AuthService.logout();
+          return;
         }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk dengan email.',
+            ),
+          ),
+        );
       }
       if (!await AuthService.isLoggedIn() || !mounted) return;
       widget.onLoginSuccess();
@@ -756,12 +758,16 @@ class _SetPasswordSheetState extends State<_SetPasswordSheet> {
   @override
   Widget build(BuildContext context) {
     final cleanEmail = widget.email?.trim() ?? '';
-    final subtitleText = cleanEmail.isNotEmpty
-        ? 'Akun Google ($cleanEmail) belum memiliki kata sandi. Buat kata sandi sekarang agar kamu juga bisa masuk pakai email dan kata sandi.'
-        : 'Akun Google kamu belum memiliki kata sandi. Buat kata sandi sekarang agar kamu juga bisa masuk pakai email dan kata sandi.';
+    final subtitleText = widget.isPostLoginPrompt
+        ? (cleanEmail.isNotEmpty
+            ? 'Akun Google ($cleanEmail) wajib membuat kata sandi sebelum melanjutkan ke Unitas.'
+            : 'Akun Google kamu wajib membuat kata sandi sebelum melanjutkan ke Unitas.')
+        : (cleanEmail.isNotEmpty
+            ? 'Akun Google ($cleanEmail) belum memiliki kata sandi. Buat kata sandi sekarang agar kamu juga bisa masuk pakai email dan kata sandi.'
+            : 'Akun Google kamu belum memiliki kata sandi. Buat kata sandi sekarang agar kamu juga bisa masuk pakai email dan kata sandi.');
 
     return PopScope(
-      canPop: !_busy,
+      canPop: !widget.isPostLoginPrompt && !_busy,
       child: SafeArea(
         top: false,
         child: Padding(
@@ -874,7 +880,7 @@ class _SetPasswordSheetState extends State<_SetPasswordSheet> {
                     onPressed:
                         _busy ? null : () => Navigator.pop(context, false),
                     child: Text(
-                      widget.isPostLoginPrompt ? 'Lewati dulu' : 'Batal',
+                      widget.isPostLoginPrompt ? 'Keluar' : 'Batal',
                       style: caption.copyWith(
                         color: dim2,
                         fontWeight: FontWeight.w600,

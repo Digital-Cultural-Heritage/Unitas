@@ -20,7 +20,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   bool _loading = true;
   String? _error;
   bool _submitting = false;
-  bool _liking = false;
   bool _mutatingPost = false;
   final Set<String> _deletingCommentIds = {};
   final _commentCtrl = TextEditingController();
@@ -29,7 +28,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   late int _likesCount;
   late String _postContent;
-  bool _liked = false;
+  late bool _liked;
   String? _replyToCommentId;
   String? _replyToName;
   final Set<String> _expandedThreads = {};
@@ -38,13 +37,29 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   void initState() {
     super.initState();
     _postContent = (widget.post['content'] ?? '').toString();
-    _likesCount = (widget.post['likes_count'] as num?)?.toInt() ?? 0;
-    if (_likesCount < 0) _likesCount = 0;
+    final postId = widget.post['id']?.toString();
+    final pending = postId != null && postId.isNotEmpty
+        ? PostsService.likeSync.pendingFor(postId)
+        : null;
+    if (pending != null) {
+      _liked = pending.liked;
+      _likesCount = pending.likesCount;
+    } else {
+      _liked = widget.post['is_liked'] == true;
+      _likesCount = (widget.post['likes_count'] as num?)?.toInt() ?? 0;
+      if (_likesCount < 0) _likesCount = 0;
+    }
+    PostsService.likeSync.addListener(_onLikeSyncChanged);
     _load();
   }
 
   @override
   void dispose() {
+    PostsService.likeSync.removeListener(_onLikeSyncChanged);
+    final postId = widget.post['id']?.toString();
+    if (postId != null && postId.isNotEmpty) {
+      PostsService.likeSync.flush(postId);
+    }
     _commentCtrl.dispose();
     _commentFocus.dispose();
     super.dispose();
@@ -107,37 +122,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return myId != null && myId.isNotEmpty && authorId != null && myId == authorId;
   }
 
-  Future<void> _toggleLike() async {
-    if (_liking) return;
+  void _onLikeSyncChanged(String postId, PostLikeSnapshot snap) {
+    if (!mounted || postId != widget.post['id']?.toString()) return;
+    setState(() {
+      _liked = snap.liked;
+      _likesCount = snap.likesCount;
+    });
+  }
+
+  void _toggleLike() {
     final postId = widget.post['id']?.toString();
     if (postId == null || postId.isEmpty) return;
-    _liking = true;
-    final wasLiked = _liked;
-    final originalLikes = _likesCount;
-    setState(() {
-      _liked = !wasLiked;
-      _likesCount = (originalLikes + (wasLiked ? -1 : 1)).clamp(0, 999999);
-    });
-    try {
-      final serverLiked = await PostsService.toggleLike(postId);
-      if (mounted && serverLiked != _liked) {
-        setState(() {
-          _liked = serverLiked;
-          _likesCount = (serverLiked == wasLiked)
-              ? originalLikes
-              : (originalLikes + (serverLiked ? 1 : -1)).clamp(0, 999999);
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _liked = wasLiked;
-          _likesCount = originalLikes;
-        });
-      }
-    } finally {
-      _liking = false;
-    }
+    PostsService.likeSync.toggle(
+      postId: postId,
+      currentLiked: _liked,
+      currentCount: _likesCount,
+    );
   }
 
   void _startReply(Map<String, dynamic> targetComment, {String? rootParentId}) {

@@ -2,6 +2,7 @@ const { describe, it, before, after, beforeEach, afterEach, mock } = require("no
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const http = require("node:http");
+const jwt = require("jsonwebtoken");
 const sharp = require("sharp");
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://example.supabase.co";
@@ -101,6 +102,10 @@ function evalClause(clause, row) {
   }
   const mEq = clause.match(/^([^.]+)\.eq\.(.+)$/);
   if (mEq) return String(row[mEq[1]]) === mEq[2];
+  const mIsNull = clause.match(/^([^.]+)\.is\.null$/);
+  if (mIsNull) return row[mIsNull[1]] === null || row[mIsNull[1]] === undefined;
+  const mNeq = clause.match(/^([^.]+)\.neq\.(.+)$/);
+  if (mNeq) return row[mNeq[1]] !== null && row[mNeq[1]] !== undefined && String(row[mNeq[1]]) !== mNeq[2];
   const mIn = clause.match(/^([^.]+)\.in\.\((.+)\)$/);
   if (mIn) {
     const set = new Set(mIn[2].split(",").map((s) => s.trim()));
@@ -129,6 +134,7 @@ function createRoutesMockDb() {
   const rpcCalls = [];
   const updateOps = [];
   const lastQueries = [];
+  const fromCalls = [];
 
   function makeBuilder(table) {
     const state = {
@@ -307,6 +313,10 @@ function createRoutesMockDb() {
           item.is_read = item.is_read ?? false;
         }
         rows.push(item);
+        if (table === "post_likes") {
+          const p = tables.posts.find((row) => row.id === item.post_id);
+          if (p) p.likes_count = (p.likes_count ?? 0) + 1;
+        }
         const hydrated = hydrate(item);
         if (state.singleMode) return { data: hydrated, error: null };
         return { data: state.returning ? [hydrated] : null, error: null };
@@ -333,6 +343,12 @@ function createRoutesMockDb() {
       if (state.op === "delete") {
         const deleted = rows.filter(matches);
         tables[table] = rows.filter((r) => !matches(r));
+        if (table === "post_likes") {
+          for (const del of deleted) {
+            const p = tables.posts.find((row) => row.id === del.post_id);
+            if (p) p.likes_count = Math.max(0, (p.likes_count ?? 0) - 1);
+          }
+        }
         return { data: state.returning ? deleted : null, error: null };
       }
 
@@ -370,7 +386,11 @@ function createRoutesMockDb() {
     rpcCalls,
     updateOps,
     lastQueries,
-    from: (table) => makeBuilder(table),
+    fromCalls,
+    from: (table) => {
+      fromCalls.push(table);
+      return makeBuilder(table);
+    },
     rpc: async (fn, args) => {
       rpcCalls.push({ fn, args });
       return { data: null, error: null };
@@ -497,18 +517,65 @@ describe("Unitas API Routes (posts, events, jobs, messages, notifications, users
       403
     );
 
-    // Toggle like on/off and 404 on missing post
+    // Toggle like on/off (legacy) and 404 on missing post
     assert.equal((await request("POST", `/api/posts/${missingId}/like`, {}, { Authorization: `Bearer ${tokenB}` })).status, 404);
+    assert.equal((await request("POST", `/api/posts/${missingId}/like`, { liked: false }, { Authorization: `Bearer ${tokenB}` })).status, 404);
     const likeOn = await request("POST", `/api/posts/${postId}/like`, {}, { Authorization: `Bearer ${tokenB}` });
     assert.equal(likeOn.status, 200);
     assert.equal(likeOn.body.liked, true);
+    assert.equal(likeOn.body.likes_count, 1);
     assert.equal(db.tables.notifications.length, 1);
     const likeOff = await request("POST", `/api/posts/${postId}/like`, {}, { Authorization: `Bearer ${tokenB}` });
     assert.equal(likeOff.status, 200);
     assert.equal(likeOff.body.liked, false);
+    assert.equal(likeOff.body.likes_count, 0);
+
+    // Idempotent like/unlike + per-user is_liked on feed reload
+    const otherPost = await request("POST", "/api/posts", { content: "Post 2" }, { Authorization: `Bearer ${tokenA}` });
+    assert.equal(otherPost.body.is_liked, false);
+
+    const setLike1 = await request("POST", `/api/posts/${postId}/like`, { liked: true }, { Authorization: `Bearer ${tokenB}` });
+    const setLike2 = await request("POST", `/api/posts/${postId}/like`, { liked: true }, { Authorization: `Bearer ${tokenB}` });
+    assert.equal(setLike1.status, 200);
+    assert.equal(setLike1.body.liked, true);
+    assert.equal(setLike1.body.likes_count, 1);
+    assert.equal(setLike2.status, 200);
+    assert.equal(setLike2.body.liked, true);
+    assert.equal(setLike2.body.likes_count, 1);
+    assert.equal(db.tables.notifications.length, 2); // +1 total (duplicate liked:true did not re-notify)
+
+    // GET /api/posts returns viewer-specific is_liked, unauthenticated returns false, expired Bearer -> 401
+    const anonFeed = await request("GET", "/api/posts");
+    assert.equal(anonFeed.status, 200);
+    assert.equal(anonFeed.body.data.every((p) => p.is_liked === false), true);
+
+    const expiredToken = jwt.sign(
+      { userId: userB, email: "b@unitas.id", role: "alumni" },
+      process.env.JWT_SECRET,
+      { expiresIn: -10 }
+    );
+    const expiredFeed = await request("GET", "/api/posts", null, { Authorization: `Bearer ${expiredToken}` });
+    assert.equal(expiredFeed.status, 401);
+
+    const feedB = await request("GET", "/api/posts", null, { Authorization: `Bearer ${tokenB}` });
+    assert.equal(feedB.status, 200);
+    const likedRow = feedB.body.data.find((p) => p.id === postId);
+    const unlikedRow = feedB.body.data.find((p) => p.id === otherPost.body.id);
+    assert.equal(likedRow.is_liked, true);
+    assert.equal(likedRow.likes_count, 1);
+    assert.equal(unlikedRow.is_liked, false);
+
+    const feedA = await request("GET", "/api/posts", null, { Authorization: `Bearer ${tokenA}` });
+    assert.equal(feedA.body.data.find((p) => p.id === postId).is_liked, false);
+
+    const setUnlike1 = await request("POST", `/api/posts/${postId}/like`, { liked: false }, { Authorization: `Bearer ${tokenB}` });
+    const setUnlike2 = await request("POST", `/api/posts/${postId}/like`, { liked: false }, { Authorization: `Bearer ${tokenB}` });
+    assert.equal(setUnlike1.body.liked, false);
+    assert.equal(setUnlike1.body.likes_count, 0);
+    assert.equal(setUnlike2.body.liked, false);
+    assert.equal(setUnlike2.body.likes_count, 0);
 
     // Comments + cross-post parent validation
-    const otherPost = await request("POST", "/api/posts", { content: "Post 2" }, { Authorization: `Bearer ${tokenA}` });
     const c1 = await request(
       "POST",
       `/api/posts/${postId}/comments`,
@@ -795,6 +862,87 @@ describe("Unitas API Routes (posts, events, jobs, messages, notifications, users
       (await request("PUT", `/api/users/requests/${connId}`, { action: "reject" }, { Authorization: `Bearer ${tokenB}` })).status,
       409
     );
+  });
+
+  it("GET /api/users supports pagination metadata, exclude_kota, connected=true, eager bio, and constant query count (no N+1)", async () => {
+    const userD = "44444444-4444-4444-8444-444444444444";
+    const userE = "55555555-5555-4555-8555-555555555555";
+    db.tables.users.push(
+      { id: userD, email: "d@unitas.id", role: "alumni" },
+      { id: userE, email: "e@unitas.id", role: "alumni" }
+    );
+    db.tables.user_profiles[0].bio = "Alumni TI '20";
+    db.tables.user_profiles.push(
+      { id: crypto.randomUUID(), user_id: userD, full_name: "Diana", initials: "DI", points: 40, kota: "Jakarta", prodi: "TI", angkatan: "2019", bio: "Senior Eng" },
+      { id: crypto.randomUUID(), user_id: userE, full_name: "Eko", initials: "EK", points: 5, kota: null, prodi: "SI", angkatan: "2023", bio: null }
+    );
+    db.tables.alumni_connections.push(
+      { id: crypto.randomUUID(), requester_id: userA, addressee_id: userB, status: "accepted" },
+      { id: crypto.randomUUID(), requester_id: userD, addressee_id: userA, status: "accepted" },
+      { id: crypto.randomUUID(), requester_id: userA, addressee_id: userC, status: "pending" }
+    );
+
+    // Page 1 & Page 2 pagination metadata + eager bio + <=2 DB queries (no N+1)
+    db.fromCalls.length = 0;
+    const page1 = await request("GET", "/api/users?page=1&limit=2", null, { Authorization: `Bearer ${tokenA}` });
+    assert.equal(page1.status, 200);
+    assert.equal(db.fromCalls.length <= 2, true);
+    assert.equal(page1.body.data.length, 2);
+    assert.equal(page1.body.total, 5);
+    assert.equal(page1.body.page, 1);
+    assert.equal(page1.body.limit, 2);
+    assert.equal(page1.body.total_pages, 3);
+    assert.equal(page1.body.has_next, true);
+    assert.equal(page1.body.has_prev, false);
+    assert.equal(page1.body.data[0].bio, "Alumni TI '20");
+
+    const page2 = await request("GET", "/api/users?page=2&limit=2", null, { Authorization: `Bearer ${tokenA}` });
+    assert.equal(page2.status, 200);
+    assert.equal(page2.body.data.length, 2);
+    assert.equal(page2.body.has_next, true);
+    assert.equal(page2.body.has_prev, true);
+    const page1Ids = new Set(page1.body.data.map((u) => u.user_id));
+    assert.equal(page2.body.data.every((u) => !page1Ids.has(u.user_id)), true);
+
+    // exclude_kota includes null-kota rows + combines cleanly with search q
+    const nonJakarta = await request("GET", "/api/users?exclude_kota=Jakarta&page=1&limit=10");
+    assert.equal(nonJakarta.status, 200);
+    assert.equal(nonJakarta.body.total, 3); // Bob (Bandung), Charlie (Surabaya), Eko (null)
+    assert.equal(nonJakarta.body.data.some((u) => u.user_id === userE), true);
+    assert.equal(nonJakarta.body.data.some((u) => u.kota === "Jakarta"), false);
+
+    const nonJakartaSearch = await request("GET", "/api/users?exclude_kota=Jakarta&q=Eko");
+    assert.equal(nonJakartaSearch.status, 200);
+    assert.equal(nonJakartaSearch.body.total, 1);
+    assert.equal(nonJakartaSearch.body.data[0].user_id, userE);
+
+    // connected=true filters server-side with <=2 DB queries; anon returns empty
+    db.fromCalls.length = 0;
+    const connectedRes = await request("GET", "/api/users?connected=true&page=1&limit=10", null, {
+      Authorization: `Bearer ${tokenA}`,
+    });
+    assert.equal(connectedRes.status, 200);
+    assert.equal(db.fromCalls.length <= 2, true);
+    assert.equal(connectedRes.body.total, 2);
+    assert.deepEqual(
+      connectedRes.body.data.map((u) => u.user_id).sort(),
+      [userB, userD].sort()
+    );
+    assert.equal(connectedRes.body.data.every((u) => u.connection_status === "accepted"), true);
+
+    const anonConn = await request("GET", "/api/users?connected=true");
+    assert.equal(anonConn.status, 200);
+    assert.equal(anonConn.body.total, 0);
+    assert.deepEqual(anonConn.body.data, []);
+
+    // Expired Bearer token on GET /api/users returns 401 so Flutter refreshes cleanly
+    const expired = jwt.sign(
+      { userId: userA, email: "a@unitas.id", role: "alumni" },
+      process.env.JWT_SECRET,
+      { expiresIn: -10 }
+    );
+    const expRes = await request("GET", "/api/users", null, { Authorization: `Bearer ${expired}` });
+    assert.equal(expRes.status, 401);
   });
 
   it("DELETE /api/users/me rejects logged-out tokens with 401, deletes active user, and returns 404 after", async () => {

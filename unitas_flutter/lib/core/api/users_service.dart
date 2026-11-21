@@ -1,21 +1,71 @@
 ﻿import '../utils/json_utils.dart';
 import 'api_client.dart';
 
+class DirectoryPage {
+  final List<Map<String, dynamic>> items;
+  final int total;
+  final int page;
+  final int limit;
+  final int totalPages;
+  final bool hasPrev;
+  final bool hasNext;
+
+  const DirectoryPage({
+    required this.items,
+    required this.total,
+    required this.page,
+    required this.limit,
+    required this.totalPages,
+    required this.hasPrev,
+    required this.hasNext,
+  });
+}
+
 class UsersService {
   // ── Directory ──────────────────────────────────────────────────────────
-  static Future<List<Map<String, dynamic>>> getDirectory({
+  static Future<DirectoryPage> getDirectory({
     String? q,
     String? kota,
+    String? excludeKota,
+    bool connectedOnly = false,
     bool? isOnline,
     int page = 1,
+    int limit = 15,
   }) async {
-    final params = StringBuffer('/api/users?page=$page&limit=30');
-    if (q != null && q.isNotEmpty) params.write('&q=${Uri.encodeComponent(q)}');
-    if (kota != null && kota != 'Semua') params.write('&kota=${Uri.encodeComponent(kota)}');
+    final safePage = page < 1 ? 1 : page;
+    final safeLimit = limit < 1 ? 15 : limit;
+    final params = StringBuffer('/api/users?page=$safePage&limit=$safeLimit');
+    if (q != null && q.trim().isNotEmpty) {
+      params.write('&q=${Uri.encodeComponent(q.trim())}');
+    }
+    if (kota != null && kota.trim().isNotEmpty && kota != 'Semua') {
+      params.write('&kota=${Uri.encodeComponent(kota.trim())}');
+    } else if (excludeKota != null && excludeKota.trim().isNotEmpty) {
+      params.write('&exclude_kota=${Uri.encodeComponent(excludeKota.trim())}');
+    }
+    if (connectedOnly) params.write('&connected=true');
     if (isOnline == true) params.write('&is_online=true');
 
     final res = await ApiClient.get(params.toString(), auth: true);
-    return asJsonMapList(res);
+    final map = asJsonMap(res);
+    final items = asJsonMapList(res);
+    final total = (map['total'] as num?)?.toInt() ?? items.length;
+    final respPage = (map['page'] as num?)?.toInt() ?? safePage;
+    final respLimit = (map['limit'] as num?)?.toInt() ?? safeLimit;
+    final computedPages = respLimit > 0 ? ((total + respLimit - 1) ~/ respLimit) : 1;
+    final rawTotalPages = (map['total_pages'] as num?)?.toInt() ?? computedPages;
+    final totalPages = rawTotalPages < 1 ? 1 : rawTotalPages;
+    final normalizedPage = respPage < 1 ? 1 : respPage;
+
+    return DirectoryPage(
+      items: items,
+      total: total,
+      page: normalizedPage,
+      limit: respLimit,
+      totalPages: totalPages,
+      hasPrev: normalizedPage > 1,
+      hasNext: normalizedPage < totalPages,
+    );
   }
 
   // ── Get single user profile ────────────────────────────────────────────

@@ -60,8 +60,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _refreshingBadges = false;
   bool _pickingImage = false;
   bool _mutatingPost = false;
-  final Set<String> _likingIds = {};
-  final Map<String, bool> _likedMap = {};
   final _postCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   Timer? _badgeTimer;
@@ -80,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    PostsService.likeSync.removeListener(_onLikeSyncChanged);
     WidgetsBinding.instance.removeObserver(this);
     _badgeTimer?.cancel();
     _scrollCtrl.removeListener(_onScroll);
@@ -93,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    PostsService.likeSync.addListener(_onLikeSyncChanged);
     _scrollCtrl.addListener(_onScroll);
     _startBadgePolling();
     _load();
@@ -112,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden) {
       _badgeTimer?.cancel();
+      PostsService.likeSync.flushAll();
     }
   }
 
@@ -165,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final posts = await PostsService.getFeed(page: 1);
       if (mounted && seq == _loadSeq) {
         setState(() {
-          _posts = posts;
+          _posts = PostsService.likeSync.applyPending(posts);
           _feedPage = 1;
           _hasMoreFeed = posts.length >= 20;
           _feedError = null;
@@ -196,7 +197,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final more = await PostsService.getFeed(page: nextPage);
       if (mounted && seq == _loadSeq) {
         setState(() {
-          _posts = [..._posts, ...more];
+          _posts = [..._posts, ...PostsService.likeSync.applyPending(more)];
           _feedPage = nextPage;
           _hasMoreFeed = more.length >= 20;
           _loadingMoreFeed = false;
@@ -245,50 +246,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _toggleLike(String postId) async {
-    if (postId.isEmpty || _likingIds.contains(postId)) return;
-    _likingIds.add(postId);
-    final wasLiked = _likedMap[postId] ?? false;
+  void _onLikeSyncChanged(String postId, PostLikeSnapshot snap) {
+    if (!mounted) return;
     final idx = _posts.indexWhere((p) => p['id']?.toString() == postId);
-    final originalLikes = idx != -1 ? ((_posts[idx]['likes_count'] as num?)?.toInt() ?? 0) : 0;
-
+    if (idx == -1) return;
     setState(() {
-      _likedMap[postId] = !wasLiked;
-      if (idx != -1) {
-        final next = originalLikes + (wasLiked ? -1 : 1);
-        _posts[idx] = Map.from(_posts[idx])..['likes_count'] = next < 0 ? 0 : next;
-      }
+      _posts[idx] = {
+        ..._posts[idx],
+        'is_liked': snap.liked,
+        'likes_count': snap.likesCount,
+      };
     });
-    try {
-      final serverLiked = await PostsService.toggleLike(postId);
-      if (mounted) {
-        setState(() {
-          _likedMap[postId] = serverLiked;
-          final curIdx = _posts.indexWhere((p) => p['id']?.toString() == postId);
-          if (curIdx != -1) {
-            final expectedLikes = serverLiked == wasLiked
-                ? originalLikes
-                : originalLikes + (serverLiked ? 1 : -1);
-            _posts[curIdx] = Map.from(_posts[curIdx])
-              ..['likes_count'] = expectedLikes < 0 ? 0 : expectedLikes;
-          }
-        });
-      }
-    } catch (_) {
-      // Revert on error
-      if (mounted) {
-        setState(() {
-          _likedMap[postId] = wasLiked;
-          final curIdx = _posts.indexWhere((p) => p['id']?.toString() == postId);
-          if (curIdx != -1) {
-            _posts[curIdx] = Map.from(_posts[curIdx])
-              ..['likes_count'] = originalLikes < 0 ? 0 : originalLikes;
-          }
-        });
-      }
-    } finally {
-      _likingIds.remove(postId);
-    }
+  }
+
+  void _toggleLike(String postId) {
+    if (postId.isEmpty) return;
+    final idx = _posts.indexWhere((p) => p['id']?.toString() == postId);
+    if (idx == -1) return;
+    final post = _posts[idx];
+    PostsService.likeSync.toggle(
+      postId: postId,
+      currentLiked: post['is_liked'] == true,
+      currentCount: (post['likes_count'] as num?)?.toInt() ?? 0,
+    );
   }
 
   String _initials(Map<String, dynamic> post) {
@@ -1292,7 +1272,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildPostCard(BuildContext context, int i, Map<String, dynamic> post) {
     final rawId = post['id']?.toString();
-    final id = rawId ?? '$i';
     final profile = _profile(post);
     final rawName = (profile['full_name'] ?? '').toString().trim();
     final name = rawName.isEmpty ? 'Alumni' : rawName;
@@ -1309,7 +1288,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final likes = rawLikes < 0 ? 0 : rawLikes;
     final rawComments = (post['comments_count'] as num?)?.toInt() ?? 0;
     final comments = rawComments < 0 ? 0 : rawComments;
-    final liked = _likedMap[id] ?? false;
+    final liked = post['is_liked'] == true;
     final content = (post['content'] ?? '').toString();
     final imageUrl = post['image_url']?.toString().trim();
     final imageCacheWidth = (600 * MediaQuery.devicePixelRatioOf(context)).round().clamp(300, 1440);

@@ -1,7 +1,7 @@
 ﻿const express = require("express");
 const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, resolveOptionalViewerId } = require("../middleware/auth");
 const { createNotification } = require("../lib/notifications");
 const {
   uuidParam,
@@ -44,9 +44,65 @@ async function postMissingOrForbidden(postId, res) {
   return res.status(403).json({ error: "Tidak diizinkan" });
 }
 
+async function fetchPostLikesCount(postId) {
+  const { data: post, error } = await supabase
+    .from("posts")
+    .select("likes_count")
+    .eq("id", postId)
+    .maybeSingle();
+  if (error) throw error;
+  return post ? Math.max(0, post.likes_count ?? 0) : null;
+}
+
+async function unlikePost(postId, userId) {
+  const { data: removed, error } = await supabase
+    .from("post_likes")
+    .delete()
+    .eq("post_id", postId)
+    .eq("user_id", userId)
+    .select("id");
+  if (error) throw error;
+  return Boolean(removed && removed.length > 0);
+}
+
+async function insertLike(postId, userId) {
+  const { error: insErr } = await supabase
+    .from("post_likes")
+    .insert({ post_id: postId, user_id: userId });
+  if (insErr) {
+    if (isFkViolation(insErr)) return { status: 404 };
+    if (isUniqueViolation(insErr)) {
+      const likesCount = await fetchPostLikesCount(postId);
+      if (likesCount === null) return { status: 404 };
+      return { status: 200, body: { liked: true, likes_count: likesCount } };
+    }
+    throw insErr;
+  }
+
+  const [{ data: post, error: postErr }, { data: actorProfile }] = await Promise.all([
+    supabase.from("posts").select("user_id, likes_count").eq("id", postId).maybeSingle(),
+    supabase.from("user_profiles").select("full_name").eq("user_id", userId).maybeSingle(),
+  ]);
+  if (postErr) throw postErr;
+  if (post) {
+    const actorName = actorProfile?.full_name || "Seseorang";
+    await createNotification({
+      userId: post.user_id,
+      actorId: userId,
+      type: "like",
+      title: `${actorName} menyukai postinganmu`,
+      referenceId: postId,
+    });
+  }
+  return { status: 200, body: { liked: true, likes_count: Math.max(0, post?.likes_count ?? 0) } };
+}
+
 // -- GET /api/posts - Feed -------------------------------------------------
 router.get("/", async (req, res, next) => {
   try {
+    const viewerId = resolveOptionalViewerId(req, res);
+    if (viewerId === undefined) return;
+
     const { page, limit, offset, to } = parsePagination(req.query);
     const userId = typeof req.query.user_id === "string" ? req.query.user_id.trim() : "";
     if (userId && !isUuid(userId)) {
@@ -70,7 +126,25 @@ router.get("/", async (req, res, next) => {
       .range(offset, to);
 
     if (error) throw error;
-    res.json({ data, total: count, page, limit });
+
+    const posts = data || [];
+    let likedIds = new Set();
+    if (viewerId && posts.length > 0) {
+      const { data: likes, error: likesErr } = await supabase
+        .from("post_likes")
+        .select("post_id")
+        .eq("user_id", viewerId)
+        .in("post_id", posts.map((p) => p.id));
+      if (likesErr) throw likesErr;
+      likedIds = new Set((likes || []).map((l) => l.post_id));
+    }
+
+    res.json({
+      data: posts.map((p) => ({ ...p, is_liked: likedIds.has(p.id) })),
+      total: count,
+      page,
+      limit,
+    });
   } catch (err) {
     next(err);
   }
@@ -121,7 +195,7 @@ router.post(
       // Tambah poin untuk post baru
       await awardPoints(req.user.userId, 10);
 
-      res.status(201).json(data);
+      res.status(201).json({ ...data, is_liked: false });
     } catch (err) {
       next(err);
     }
@@ -178,49 +252,32 @@ router.delete("/:id", requireAuth, async (req, res, next) => {
   }
 });
 
-// -- POST /api/posts/:id/like - Toggle like --------------------------------
+// -- POST /api/posts/:id/like - Idempotent set ({ liked }) or toggle ---------
 router.post("/:id/like", requireAuth, async (req, res, next) => {
   try {
     const postId = req.params.id;
     const userId = req.user.userId;
+    const explicitLiked = typeof req.body?.liked === "boolean" ? req.body.liked : null;
 
-    // Try to unlike first: a single atomic DELETE tells us whether a like existed.
-    const { data: removed, error: delErr } = await supabase
-      .from("post_likes")
-      .delete()
-      .eq("post_id", postId)
-      .eq("user_id", userId)
-      .select("id");
-    if (delErr) throw delErr;
-    if (removed && removed.length > 0) return res.json({ liked: false });
-
-    // Like. The UNIQUE(post_id, user_id) constraint guards against double-tap races;
-    // likes_count is maintained atomically by a DB trigger.
-    const { error: insErr } = await supabase
-      .from("post_likes")
-      .insert({ post_id: postId, user_id: userId });
-    if (insErr) {
-      if (isUniqueViolation(insErr)) return res.json({ liked: true }); // concurrent duplicate
-      if (isFkViolation(insErr)) return res.status(404).json({ error: "Post tidak ditemukan" });
-      throw insErr;
+    if (explicitLiked === false) {
+      await unlikePost(postId, userId);
+      const likesCount = await fetchPostLikesCount(postId);
+      if (likesCount === null) return res.status(404).json({ error: "Post tidak ditemukan" });
+      return res.json({ liked: false, likes_count: likesCount });
     }
 
-    const [{ data: post }, { data: actorProfile }] = await Promise.all([
-      supabase.from("posts").select("user_id").eq("id", postId).maybeSingle(),
-      supabase.from("user_profiles").select("full_name").eq("user_id", userId).maybeSingle(),
-    ]);
-    if (post) {
-      const actorName = actorProfile?.full_name || "Seseorang";
-      await createNotification({
-        userId: post.user_id,
-        actorId: userId,
-        type: "like",
-        title: `${actorName} menyukai postinganmu`,
-        referenceId: postId,
-      });
+    if (explicitLiked === null) {
+      const removed = await unlikePost(postId, userId);
+      if (removed) {
+        const likesCount = await fetchPostLikesCount(postId);
+        if (likesCount === null) return res.status(404).json({ error: "Post tidak ditemukan" });
+        return res.json({ liked: false, likes_count: likesCount });
+      }
     }
 
-    res.json({ liked: true });
+    const result = await insertLike(postId, userId);
+    if (result.status === 404) return res.status(404).json({ error: "Post tidak ditemukan" });
+    return res.json(result.body);
   } catch (err) {
     next(err);
   }

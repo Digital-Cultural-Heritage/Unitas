@@ -90,7 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         setState(() {
           _profile = profile;
-          _posts = posts;
+          _posts = PostsService.likeSync.applyPending(posts);
           _connections = results[1] as List<Map<String, dynamic>>;
           _requests = results[2] as List<Map<String, dynamic>>;
           _error = null;
@@ -658,7 +658,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final postId = post['id']?.toString() ?? '';
     final content = (post['content'] ?? '').toString().trim();
     final imageUrl = (post['image_url'] ?? '').toString().trim();
-    final likesCount = post['likes_count'] ?? 0;
+    final rawLikes = (post['likes_count'] as num?)?.toInt() ?? 0;
+    final likesCount = rawLikes < 0 ? 0 : rawLikes;
+    final liked = post['is_liked'] == true;
     final commentsCount = post['comments_count'] ?? 0;
     final createdAt = _timeAgo(post['created_at']?.toString());
     final name = (_profile?['full_name'] ?? 'Pengguna').toString().trim();
@@ -743,9 +745,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Icon(Icons.favorite_border, size: 16, color: dim2),
+                  Icon(
+                    liked ? Icons.favorite : Icons.favorite_border,
+                    size: 16,
+                    color: liked ? const Color(0xFFE54D4D) : dim2,
+                  ),
                   const SizedBox(width: 4),
-                  Text('$likesCount', style: caption.copyWith(color: dim2)),
+                  Text(
+                    '$likesCount',
+                    style: caption.copyWith(
+                      color: liked ? const Color(0xFFE54D4D) : dim2,
+                    ),
+                  ),
                   const SizedBox(width: 16),
                   Icon(Icons.chat_bubble_outline, size: 15, color: dim2),
                   const SizedBox(width: 4),
