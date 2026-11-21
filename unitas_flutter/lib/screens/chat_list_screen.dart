@@ -82,7 +82,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 conversationKey: convKey,
               );
               c['last_message'] = plain;
-            } catch (_) {
+            } catch (e) {
+              debugPrint('[E2EE Preview] Gagal dekripsi peer=$peerId: $e');
               // Jika gagal dekripsi, biarkan teks fallback
             }
           }

@@ -51,8 +51,40 @@ class E2eeService {
   // 1. KEY GENERATION & STORAGE
   // =========================================================================
 
+  /// Migrasikan kunci legacy (versi awal sebelum scoping userId) ke format baru per userId.
+  /// Mencegah ter-generate kunci baru yang menyebabkan pesan lama terkunci.
+  static Future<void> migrateLegacyKeys(String userId) async {
+    try {
+      final currentPriv = await _storage.read(key: _kIdentityPriv(userId));
+      if (currentPriv != null && currentPriv.isNotEmpty) return;
+
+      final legacyPriv = await _storage.read(key: 'e2ee_identity_private_key');
+      final legacyPub  = await _storage.read(key: 'e2ee_identity_public_key');
+      if (legacyPriv != null && legacyPub != null) {
+        final legacySignPriv = await _storage.read(key: 'e2ee_signing_private_key');
+        final legacySignPub  = await _storage.read(key: 'e2ee_signing_public_key');
+        final legacyPrePriv  = await _storage.read(key: 'e2ee_prekey_private_key');
+        final legacyPrePub   = await _storage.read(key: 'e2ee_prekey_public_key');
+        final legacyPreSig   = await _storage.read(key: 'e2ee_prekey_signature');
+        final legacyReg      = await _storage.read(key: 'e2ee_keys_registered');
+
+        await Future.wait([
+          _storage.write(key: _kIdentityPriv(userId), value: legacyPriv),
+          _storage.write(key: _kIdentityPub(userId), value: legacyPub),
+          if (legacySignPriv != null) _storage.write(key: _kSigningPriv(userId), value: legacySignPriv),
+          if (legacySignPub != null) _storage.write(key: _kSigningPub(userId), value: legacySignPub),
+          if (legacyPrePriv != null) _storage.write(key: _kPrekeyPriv(userId), value: legacyPrePriv),
+          if (legacyPrePub != null) _storage.write(key: _kPrekeyPub(userId), value: legacyPrePub),
+          if (legacyPreSig != null) _storage.write(key: _kPrekeySig(userId), value: legacyPreSig),
+          if (legacyReg != null) _storage.write(key: _kKeysRegistered(userId), value: legacyReg),
+        ]);
+      }
+    } catch (_) {}
+  }
+
   /// Cek apakah identity key sudah ada di device untuk akun ini
   static Future<bool> hasIdentityKeys(String userId) async {
+    await migrateLegacyKeys(userId);
     final priv = await _storage.read(key: _kIdentityPriv(userId));
     final pub  = await _storage.read(key: _kIdentityPub(userId));
     return priv != null && pub != null;
@@ -125,7 +157,8 @@ class E2eeService {
     required String conversationId,
     required String peerIdentityPublicKeyB64,
   }) async {
-    final cacheKey = '${myUserId}_$conversationId';
+    final cleanPeerPub = peerIdentityPublicKeyB64.trim();
+    final cacheKey = '${myUserId}_${conversationId}_${cleanPeerPub.hashCode}';
     if (_conversationKeyCache.containsKey(cacheKey)) {
       return _conversationKeyCache[cacheKey]!;
     }
@@ -146,7 +179,7 @@ class E2eeService {
     );
 
     final peerPublicKey = SimplePublicKey(
-      List<int>.from(base64Decode(peerIdentityPublicKeyB64)),
+      List<int>.from(base64Decode(cleanPeerPub)),
       type: KeyPairType.x25519,
     );
 

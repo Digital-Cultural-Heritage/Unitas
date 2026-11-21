@@ -17,3 +17,4 @@
 
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.annotation.**
+-dontwarn com.google.android.play.core.**

@@ -266,8 +266,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
               conversationKey: key,
             );
             result.add({...m, 'displayText': plain});
-          } catch (_) {
-            result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi'});
+          } catch (e) {
+            debugPrint('[E2EE] Gagal dekripsi pesan id=${m['id']}: $e');
+            result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi (kunci perangkat telah berganti)'});
           }
         } else {
           // Kunci belum didapat (lawan bicara belum register / sedang dimuat)
