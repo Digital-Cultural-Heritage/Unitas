@@ -126,16 +126,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       if (myId == null || myId.isEmpty) return;
 
       // 1. Pastikan kunci identitas kita sendiri sudah ada & terdaftar ke server
+      //    URUTAN PENTING: cek server DULU, baru generate jika memang belum ada di mana pun.
+      //    Ini mencegah key baru ter-generate hanya karena FlutterSecureStorage di-reset.
       if (!await E2eeService.hasIdentityKeys(myId)) {
+        // Key tidak ada di lokal — cek server dulu sebelum generate baru
+        final serverMyKey = await MessagesService.getMyKeyBundle();
+        if (serverMyKey != null && serverMyKey['identity_public_key'] != null) {
+          // Server punya key untuk akun ini tapi lokal tidak ada.
+          // Private key tidak bisa direcovery — harus generate baru.
+          debugPrint('[E2EE] ⚠️ Key lokal hilang tapi server masih punya key lama. '
+              'Generate key baru — pesan lama dengan key ini tidak bisa didekripsi.');
+        }
         await E2eeService.generateIdentityKeys(myId);
       }
-      if (!await E2eeService.isRegisteredToServer(myId)) {
-        final bundle = await E2eeService.getPublicKeyBundle(myId);
-        if (bundle != null) {
-          final ok = await MessagesService.registerKeys(bundle);
-          if (ok) await E2eeService.markKeysRegistered(myId);
-        }
-      }
+
+      // Verifikasi & sinkronisasi key lokal dengan server
+      // Jika server punya key berbeda (overwrite oleh device lain), upload ulang key lokal
+      await E2eeService.verifyAndSyncKeys(
+        myId,
+        (bundle) => MessagesService.registerKeys(bundle),
+        () => MessagesService.getMyKeyBundle(),
+      );
 
       // 2. Ambil public key milik lawan bicara dari server / argumen
       String? peerPubKey = knownPeerPubKey;
@@ -267,7 +278,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   ) async {
     final result = <Map<String, dynamic>>[];
     var key = _conversationKey;
-    var attemptedKeyRefresh = false;
 
     for (final m in raw) {
       final msgId      = m['id']?.toString() ?? '';
@@ -293,36 +303,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
             if (msgId.isNotEmpty) _decryptedCache[msgId] = plain;
             result.add({...m, 'displayText': plain});
           } catch (e) {
-            // Re-fetch public key lawan bicara maksimal 1x per batch agar bebas N+1
+            // Coba re-fetch public key lawan bicara dari server sekali lagi (auto-retry)
             var decryptedOnRetry = false;
-            if (!attemptedKeyRefresh) {
-              attemptedKeyRefresh = true;
-              try {
-                final freshBundle = await MessagesService.getKeyBundle(widget.peerId);
-                final freshPubKey = freshBundle?['identity_public_key'] as String?;
-                if (freshPubKey != null &&
-                    freshPubKey.isNotEmpty &&
-                    freshPubKey != _currentPeerPubKey &&
-                    _myId != null) {
-                  final freshKey = await E2eeService.getConversationKey(
-                    myUserId: _myId!,
-                    conversationId: _conversationId,
-                    peerIdentityPublicKeyB64: freshPubKey,
-                  );
-                  final retryPlain = await E2eeService.decryptMessage(
-                    ciphertextB64: ciphertext,
-                    nonceB64: nonce,
-                    conversationKey: freshKey,
-                  );
-                  key = freshKey;
-                  _conversationKey = freshKey;
-                  _currentPeerPubKey = freshPubKey;
-                  if (msgId.isNotEmpty) _decryptedCache[msgId] = retryPlain;
-                  result.add({...m, 'displayText': retryPlain});
-                  decryptedOnRetry = true;
-                }
-              } catch (_) {}
-            }
+            try {
+              final freshBundle = await MessagesService.getKeyBundle(widget.peerId);
+              final freshPubKey = freshBundle?['identity_public_key'] as String?;
+              if (freshPubKey != null &&
+                  freshPubKey.isNotEmpty &&
+                  freshPubKey != _currentPeerPubKey &&
+                  _myId != null) {
+                final freshKey = await E2eeService.getConversationKey(
+                  myUserId: _myId!,
+                  conversationId: _conversationId,
+                  peerIdentityPublicKeyB64: freshPubKey,
+                );
+                final retryPlain = await E2eeService.decryptMessage(
+                  ciphertextB64: ciphertext,
+                  nonceB64: nonce,
+                  conversationKey: freshKey,
+                );
+                key = freshKey;
+                _conversationKey = freshKey;
+                _currentPeerPubKey = freshPubKey;
+                if (msgId.isNotEmpty) _decryptedCache[msgId] = retryPlain;
+                result.add({...m, 'displayText': retryPlain});
+                decryptedOnRetry = true;
+              }
+            } catch (_) {}
 
             if (!decryptedOnRetry) {
               debugPrint('[E2EE] Gagal dekripsi pesan id=$msgId: $e');

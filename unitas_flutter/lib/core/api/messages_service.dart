@@ -43,6 +43,17 @@ class MessagesService {
     }
   }
 
+  /// Ambil public key bundle milik kita sendiri dari server
+  /// Untuk verifikasi bahwa key lokal == key di server
+  static Future<Map<String, dynamic>?> getMyKeyBundle() async {
+    try {
+      final res = await ApiClient.get('/api/keys/me');
+      return asJsonMap(res);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Upload public key bundle ke server (dipanggil sekali saat login pertama)
   static Future<bool> registerKeys(Map<String, String> keyBundle) async {
     try {

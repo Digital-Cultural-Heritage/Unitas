@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// E2eeService — Enkripsi End-to-End untuk Unitas Chat
@@ -143,6 +144,71 @@ class E2eeService {
   static Future<bool> isRegisteredToServer(String userId) async {
     final v = await _storage.read(key: _kKeysRegistered(userId));
     return v == 'true';
+  }
+
+  /// Verifikasi bahwa public key lokal == public key yang ada di server.
+  ///
+  /// Kasus yang ditangani:
+  ///   - FlutterSecureStorage di-reset (resetOnError=true) → flag 'registered' hilang
+  ///     → app mau generate key baru → kita cegah dengan cek server dulu.
+  ///   - App diinstall ulang di HP yang sama → key lokal hilang.
+  ///   - Device lain login dengan akun yang sama dan upload key berbeda → key di server != lokal.
+  ///
+  /// Solusi:
+  ///   - Jika key lokal ADA dan sama dengan server → aman, tidak perlu apa-apa.
+  ///   - Jika key lokal ADA tapi BEDA dengan server → server ter-overwrite oleh device lain;
+  ///     upload ulang key lokal ke server agar device ini bisa enkripsi pesan baru.
+  ///   - Jika key lokal TIDAK ADA → generate baru (normal flow: install pertama kali).
+  ///
+  /// Returns true jika key berhasil disinkronisasi, false jika ada masalah.
+  static Future<bool> verifyAndSyncKeys(
+    String userId,
+    Future<bool> Function(Map<String, String> bundle) uploadFn,
+    Future<Map<String, dynamic>?> Function() fetchMyKeyFn,
+  ) async {
+    try {
+      final localPub = await _storage.read(key: _kIdentityPub(userId));
+      if (localPub == null || localPub.isEmpty) {
+        // Tidak ada key lokal — perlu generate (akan ditangani di luar fungsi ini)
+        return false;
+      }
+
+      // Ambil key kita sendiri dari server
+      final serverData = await fetchMyKeyFn();
+      final serverPub = serverData?['identity_public_key'] as String?;
+
+      if (serverPub == null || serverPub.isEmpty) {
+        // Key belum ada di server — upload key lokal
+        final bundle = await getPublicKeyBundle(userId);
+        if (bundle != null) {
+          final ok = await uploadFn(bundle);
+          if (ok) await markKeysRegistered(userId);
+          return ok;
+        }
+        return false;
+      }
+
+      if (serverPub.trim() == localPub.trim()) {
+        // Key lokal == server → sinkron, pastikan flag registered = true
+        await markKeysRegistered(userId);
+        return true;
+      }
+
+      // Key lokal BEDA dengan server → upload ulang key lokal ke server
+      // Ini memastikan device ini tetap bisa digunakan untuk enkripsi pesan baru
+      // (Kontak yang sudah punya key lokal kita sebelumnya perlu open chat lagi untuk re-sync)
+      debugPrint('[E2EE] ⚠️ Key lokal berbeda dari server — upload ulang key lokal ke server');
+      final bundle = await getPublicKeyBundle(userId);
+      if (bundle != null) {
+        final ok = await uploadFn(bundle);
+        if (ok) await markKeysRegistered(userId);
+        return ok;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[E2EE] verifyAndSyncKeys error: $e');
+      return false;
+    }
   }
 
   // =========================================================================

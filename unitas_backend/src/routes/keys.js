@@ -76,6 +76,28 @@ router.post(
   }
 );
 
+// ── GET /api/keys/me ───────────────────────────────────────────────────────
+// Ambil public key bundle milik user yang sedang login (cek sinkronisasi).
+// Digunakan oleh app untuk memastikan key lokal == key di server.
+router.get("/me", requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const { data, error } = await supabase
+      .from("user_keys")
+      .select("user_id, identity_public_key, signing_public_key, signed_prekey_public, signed_prekey_signature, updated_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: "Key belum terdaftar" });
+    }
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── GET /api/keys/:userId ─────────────────────────────────────────────────
 // Ambil public key bundle milik user lain untuk memulai sesi E2EE.
 // Hanya mengembalikan public key — tidak ada secret.
