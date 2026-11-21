@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/api/api_client.dart';
 import '../core/api/auth_service.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
+import '../widgets/google_web_button.dart';
 
 String? validateAuthEmail(String? value) {
   if (value == null) return 'Email tidak valid';
@@ -124,49 +126,79 @@ class GoogleContinueButton extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: brandNavy,
-              side: BorderSide(color: borderColor),
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: disabled ? null : onPressed,
-            child: loading
-                ? const SizedBox(
+        if (kIsWeb)
+          loading
+              ? Container(
+                  width: double.infinity,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
                       color: brandNavy,
                       strokeWidth: 2,
                     ),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CustomPaint(painter: _GoogleLogoPainter()),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Lanjutkan dengan Google',
-                        style: buttonStyle.copyWith(
-                          color: brandNavy,
-                          fontSize: 14.5,
-                        ),
-                      ),
-                    ],
                   ),
+                )
+              : IgnorePointer(
+                  ignoring: disabled,
+                  child: Opacity(
+                    opacity: disabled ? 0.55 : 1.0,
+                    child: buildGoogleWebButton(
+                      initialize: AuthService.ensureGoogleInitialized,
+                    ),
+                  ),
+                )
+        else
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: brandNavy,
+                side: BorderSide(color: borderColor),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: disabled ? null : onPressed,
+              child: loading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: brandNavy,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CustomPaint(painter: _GoogleLogoPainter()),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Lanjutkan dengan Google',
+                          style: buttonStyle.copyWith(
+                            color: brandNavy,
+                            fontSize: 14.5,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
           ),
-        ),
         const SizedBox(height: 8),
         Text(
           'Gunakan akun Google kampus Unud',

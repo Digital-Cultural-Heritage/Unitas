@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../core/api/api_client.dart';
 import '../core/api/auth_service.dart';
 import '../core/theme/colors.dart';
@@ -19,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  StreamSubscription<GoogleSignInAuthenticationEvent>? _googleAuthSub;
   bool _loading = false;
   bool _googleLoading = false;
   bool _obscure = true;
@@ -27,7 +31,34 @@ class _LoginScreenState extends State<LoginScreen> {
   bool get _busy => _loading || _googleLoading;
 
   @override
+  void initState() {
+    super.initState();
+    if (kIsWeb) {
+      unawaited(
+        AuthService.ensureGoogleInitialized().then((_) {
+          if (!mounted) return;
+          _googleAuthSub = GoogleSignIn.instance.authenticationEvents.listen(
+            (event) {
+              if (event is GoogleSignInAuthenticationEventSignIn) {
+                unawaited(_handleWebGoogleAccount(event.user));
+              }
+            },
+            onError: (Object err) {
+              if (!mounted) return;
+              final msg = err is GoogleSignInException
+                  ? AuthService.mapGoogleError(err)
+                  : 'Gagal masuk dengan Google. Cek koneksi atau coba lagi.';
+              setState(() => _error = msg);
+            },
+          );
+        }).catchError((_) {}),
+      );
+    }
+  }
+
+  @override
   void dispose() {
+    unawaited(_googleAuthSub?.cancel());
     _emailCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
@@ -79,7 +110,15 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _continueWithGoogle() async {
+  Future<void> _handleWebGoogleAccount(GoogleSignInAccount account) =>
+      _runGoogleSignIn(() => AuthService.completeGoogleSignIn(account));
+
+  Future<void> _continueWithGoogle() =>
+      _runGoogleSignIn(AuthService.signInWithGoogle);
+
+  Future<void> _runGoogleSignIn(
+    Future<Map<String, dynamic>?> Function() action,
+  ) async {
     if (_busy) return;
     FocusScope.of(context).unfocus();
     setState(() {
@@ -87,9 +126,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      final session = await AuthService.signInWithGoogle();
-      if (!mounted) return;
-      if (session == null) return;
+      final session = await action();
+      if (!mounted || session == null) return;
       widget.onLoginSuccess();
     } on ApiException catch (e) {
       if (!mounted) return;

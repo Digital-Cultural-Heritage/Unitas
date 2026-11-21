@@ -31,9 +31,11 @@ class ApiClient {
   static const _kRefresh = 'refresh_token';
   static const _kUser = 'user';
 
-  // Cache di memori agar tidak membaca keystore di setiap request.
+  // Cache di memori agar tidak membaca keystore di setiap request,
+  // sekaligus fallback saat secure storage tidak tersedia (mis. web non-HTTPS).
   static String? _accessCache;
   static String? _refreshCache;
+  static String? _userJsonCache;
   static bool _loaded = false;
   static Future<void>? _loading;
   // Mencegah race condition antara load/refresh in-flight dengan save/clearSession.
@@ -53,14 +55,17 @@ class ApiClient {
         await _migrateLegacyPrefs();
         final access = await _storage.read(key: _kAccess);
         final refresh = await _storage.read(key: _kRefresh);
+        final userJson = await _storage.read(key: _kUser);
         if (_sessionEpoch == epoch) {
           _accessCache = access;
           _refreshCache = refresh;
+          _userJsonCache = userJson;
         }
       } catch (_) {
         if (_sessionEpoch == epoch) {
           _accessCache = null;
           _refreshCache = null;
+          _userJsonCache = null;
         }
       } finally {
         _loaded = true;
@@ -101,9 +106,11 @@ class ApiClient {
   static Future<String?> getStoredUserJson() async {
     try {
       await _ensureLoaded();
-      return await _storage.read(key: _kUser);
+      if (_userJsonCache != null) return _userJsonCache;
+      _userJsonCache = await _storage.read(key: _kUser);
+      return _userJsonCache;
     } catch (_) {
-      return null;
+      return _userJsonCache;
     }
   }
 
@@ -115,17 +122,23 @@ class ApiClient {
     await _ensureLoaded();
     _sessionEpoch++;
     _accessCache = accessToken;
-    await _storage.write(key: _kAccess, value: accessToken);
-    if (refreshToken != null) {
-      _refreshCache = refreshToken;
-      await _storage.write(key: _kRefresh, value: refreshToken);
+    if (refreshToken != null) _refreshCache = refreshToken;
+    if (userJson != null) _userJsonCache = userJson;
+    try {
+      await _storage.write(key: _kAccess, value: accessToken);
+      if (refreshToken != null) {
+        await _storage.write(key: _kRefresh, value: refreshToken);
+      }
+      if (userJson != null) await _storage.write(key: _kUser, value: userJson);
+    } catch (_) {
+      // Fallback ke cache memori jika Web Crypto tidak tersedia (non-HTTPS/LAN).
     }
-    if (userJson != null) await _storage.write(key: _kUser, value: userJson);
   }
 
   static Future<void> saveStoredUserJson(String userJson) async {
     try {
       await _ensureLoaded();
+      _userJsonCache = userJson;
       await _storage.write(key: _kUser, value: userJson);
     } catch (_) {}
   }
@@ -134,6 +147,7 @@ class ApiClient {
     _sessionEpoch++;
     _accessCache = null;
     _refreshCache = null;
+    _userJsonCache = null;
     _loaded = true;
     try {
       E2eeService.clearCache();

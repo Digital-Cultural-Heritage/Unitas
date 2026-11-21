@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'api_client.dart';
@@ -26,9 +27,13 @@ class AuthService {
     return _defaultGoogleServerClientId;
   }
 
-  static Future<void> _ensureGoogleInitialized() {
+  static Future<void> ensureGoogleInitialized() {
+    final clientId = googleServerClientId;
     return _googleInit ??= GoogleSignIn.instance
-        .initialize(serverClientId: googleServerClientId)
+        .initialize(
+          clientId: kIsWeb ? clientId : null,
+          serverClientId: kIsWeb ? null : clientId,
+        )
         .catchError((Object e) {
           _googleInit = null;
           throw e;
@@ -122,7 +127,7 @@ class AuthService {
   // ── Google Sign-In ─────────────────────────────────────────────────────
   /// Mengembalikan data sesi jika berhasil, atau `null` jika dibatalkan pengguna.
   static Future<Map<String, dynamic>?> signInWithGoogle() async {
-    await _ensureGoogleInitialized();
+    await ensureGoogleInitialized();
 
     if (!GoogleSignIn.instance.supportsAuthenticate()) {
       throw const ApiException(
@@ -136,9 +141,16 @@ class AuthService {
       account = await GoogleSignIn.instance.authenticate();
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) return null;
-      throw ApiException(_mapGoogleError(e), 400);
+      throw ApiException(mapGoogleError(e), 400);
     }
 
+    return completeGoogleSignIn(account);
+  }
+
+  /// Validasi domain Unud dan tukar ID token Google menjadi sesi Unitas.
+  static Future<Map<String, dynamic>> completeGoogleSignIn(
+    GoogleSignInAccount account,
+  ) async {
     if (!isAllowedUnudEmail(account.email)) {
       await signOutGoogleQuietly();
       throw const ApiException(
@@ -171,7 +183,7 @@ class AuthService {
     }
   }
 
-  static String _mapGoogleError(GoogleSignInException e) {
+  static String mapGoogleError(GoogleSignInException e) {
     switch (e.code) {
       case GoogleSignInExceptionCode.canceled:
         return 'Login Google dibatalkan.';
@@ -213,7 +225,7 @@ class AuthService {
 
   static Future<void> signOutGoogleQuietly() async {
     try {
-      await _ensureGoogleInitialized();
+      await ensureGoogleInitialized();
       await GoogleSignIn.instance.signOut();
     } catch (_) {}
   }

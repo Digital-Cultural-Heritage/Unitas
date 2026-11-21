@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:unitas_flutter/core/api/api_client.dart';
 import 'package:unitas_flutter/core/api/auth_service.dart';
 import 'package:unitas_flutter/core/theme/colors.dart';
 import 'package:unitas_flutter/core/utils/image_validator.dart';
@@ -91,6 +92,27 @@ void main() {
       expect(() => ImageValidator.validate([], 'a.jpg'), throwsA(isA<ImageValidationException>()));
       expect(() => ImageValidator.validate(jpeg, 'shell.exe'), throwsA(isA<ImageValidationException>()));
       expect(() => ImageValidator.validate(fake, 'fake.png'), throwsA(isA<ImageValidationException>()));
+    });
+  });
+
+  group('ApiClient session fallback', () {
+    test('keeps tokens and user in memory when secure storage throws', () async {
+      await ApiClient.saveSession(
+        accessToken: 'acc-123',
+        refreshToken: 'ref-456',
+        userJson: '{"id":"u1"}',
+      );
+      expect(await ApiClient.getToken(), 'acc-123');
+      expect(await ApiClient.getRefreshToken(), 'ref-456');
+      expect(await ApiClient.getStoredUserJson(), '{"id":"u1"}');
+
+      await ApiClient.saveStoredUserJson('{"id":"u2"}');
+      expect(await ApiClient.getStoredUserJson(), '{"id":"u2"}');
+
+      await ApiClient.clearSession();
+      expect(await ApiClient.getToken(), isNull);
+      expect(await ApiClient.getRefreshToken(), isNull);
+      expect(await ApiClient.getStoredUserJson(), isNull);
     });
   });
 }
