@@ -40,9 +40,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   // ── E2EE state ────────────────────────────────────────────────────────────
   SecretKey? _conversationKey;
+  String? _currentPeerPubKey;
   bool _e2eeReady = false;         // sesi E2EE sudah aktif
   bool _e2eeInitializing = false;  // sedang setup kunci
   String? _e2eeNotice;             // pesan status enkripsi jika peer belum ada key
+
+  // Cache pesan yang sudah didekripsi agar tidak pernah hilang / rusak saat key rotate
+  static final Map<String, String> _decryptedCache = {};
 
   static const _icebreakers = [
     'Halo, salam kenal!',
@@ -108,7 +112,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   /// Setup sesi E2EE dengan peer.
   /// Menghitung Conversation Secret Key via ECDH X25519 + HKDF.
-  Future<void> _setupE2ee() async {
+  Future<void> _setupE2ee([String? knownPeerPubKey]) async {
     if (!mounted) return;
     if (_myId == null) {
       final user = await AuthService.getStoredUser();
@@ -133,9 +137,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         }
       }
 
-      // 2. Ambil public key milik lawan bicara dari server
-      final peerBundle = await MessagesService.getKeyBundle(widget.peerId);
-      final peerPubKey = peerBundle?['identity_public_key'] as String?;
+      // 2. Ambil public key milik lawan bicara dari server / argumen
+      String? peerPubKey = knownPeerPubKey;
+      if (peerPubKey == null || peerPubKey.isEmpty) {
+        final peerBundle = await MessagesService.getKeyBundle(widget.peerId);
+        peerPubKey = peerBundle?['identity_public_key'] as String?;
+      }
 
       if (peerPubKey == null || peerPubKey.isEmpty) {
         // Lawan bicara belum login versi baru — pesan dikirim normal (fallback)
@@ -158,10 +165,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
       if (mounted) {
         setState(() {
-          _conversationKey  = convKey;
-          _e2eeReady        = true;
-          _e2eeInitializing = false;
-          _e2eeNotice       = null;
+          _conversationKey   = convKey;
+          _currentPeerPubKey = peerPubKey;
+          _e2eeReady         = true;
+          _e2eeInitializing  = false;
+          _e2eeNotice        = null;
         });
       }
     } catch (e) {
@@ -205,13 +213,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       setState(() { _loading = true; _error = false; });
     }
     try {
-      // Jika kunci enkripsi belum siap (misal lawan bicara baru login setelah kita buka chat),
-      // coba ambil kuncinya lagi secara otomatis
-      if (_conversationKey == null && mounted) {
+      final res = await MessagesService.getMessagesWithMeta(widget.peerId);
+      final raw = (res['data'] as List? ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      final latestPeerKey = res['peer_identity_public_key'] as String?;
+
+      // Jika lawan bicara memperbarui kunci atau kita belum punya kunci, setup ulang E2EE secara otomatis
+      if (latestPeerKey != null &&
+          latestPeerKey.isNotEmpty &&
+          latestPeerKey != _currentPeerPubKey) {
+        await _setupE2ee(latestPeerKey);
+      } else if (_conversationKey == null && mounted) {
         await _setupE2ee();
       }
 
-      final raw = await MessagesService.getMessages(widget.peerId);
       final decrypted = await _decryptMessages(raw);
 
       if (mounted && epoch == _sendEpoch) {
@@ -249,12 +266,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     List<Map<String, dynamic>> raw,
   ) async {
     final result = <Map<String, dynamic>>[];
-    final key = _conversationKey;
+    var key = _conversationKey;
 
     for (final m in raw) {
+      final msgId      = m['id']?.toString() ?? '';
       final ciphertext = m['ciphertext'] as String?;
       final nonce      = m['nonce'] as String?;
       final content    = m['content'] as String?;
+
+      // 1. Cek cache plaintext yang sudah pernah berhasil didekripsi sebelumnya
+      if (msgId.isNotEmpty && _decryptedCache.containsKey(msgId)) {
+        result.add({...m, 'displayText': _decryptedCache[msgId]!});
+        continue;
+      }
 
       if (ciphertext != null && nonce != null) {
         if (key != null) {
@@ -265,17 +289,48 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
               nonceB64: nonce,
               conversationKey: key,
             );
+            if (msgId.isNotEmpty) _decryptedCache[msgId] = plain;
             result.add({...m, 'displayText': plain});
           } catch (e) {
-            debugPrint('[E2EE] Gagal dekripsi pesan id=${m['id']}: $e');
-            result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi (kunci perangkat telah berganti)'});
+            // Coba re-fetch public key lawan bicara dari server sekali lagi (auto-retry)
+            var decryptedOnRetry = false;
+            try {
+              final freshBundle = await MessagesService.getKeyBundle(widget.peerId);
+              final freshPubKey = freshBundle?['identity_public_key'] as String?;
+              if (freshPubKey != null &&
+                  freshPubKey.isNotEmpty &&
+                  freshPubKey != _currentPeerPubKey &&
+                  _myId != null) {
+                final freshKey = await E2eeService.getConversationKey(
+                  myUserId: _myId!,
+                  conversationId: _conversationId,
+                  peerIdentityPublicKeyB64: freshPubKey,
+                );
+                final retryPlain = await E2eeService.decryptMessage(
+                  ciphertextB64: ciphertext,
+                  nonceB64: nonce,
+                  conversationKey: freshKey,
+                );
+                key = freshKey;
+                _conversationKey = freshKey;
+                _currentPeerPubKey = freshPubKey;
+                if (msgId.isNotEmpty) _decryptedCache[msgId] = retryPlain;
+                result.add({...m, 'displayText': retryPlain});
+                decryptedOnRetry = true;
+              }
+            } catch (_) {}
+
+            if (!decryptedOnRetry) {
+              debugPrint('[E2EE] Gagal dekripsi pesan id=$msgId: $e');
+              result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi (kunci perangkat telah berganti)'});
+            }
           }
         } else {
           // Kunci belum didapat (lawan bicara belum register / sedang dimuat)
           result.add({...m, 'displayText': content ?? '🔒 Pesan terenkripsi (sedang memuat kunci…)'});
         }
       } else if (content != null) {
-        // Pesan biasa / legacy
+        if (msgId.isNotEmpty) _decryptedCache[msgId] = content;
         result.add({...m, 'displayText': content});
       } else {
         result.add({...m, 'displayText': ''});
@@ -307,6 +362,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           'ciphertext': encrypted['ciphertext'],
           'nonce': encrypted['nonce'],
         });
+
+        final sentId = sent['id']?.toString() ?? '';
+        if (sentId.isNotEmpty) {
+          _decryptedCache[sentId] = text;
+        }
 
         // Bubble chat di HP pengirim langsung menampilkan teks asli yang bisa dibaca
         sent = {...sent, 'displayText': text};

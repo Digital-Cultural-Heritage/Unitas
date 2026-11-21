@@ -143,21 +143,26 @@ router.get("/:peerId", requireAuth, async (req, res, next) => {
 
     const { limit } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 200 });
 
-    // Fetch newest `limit` messages DESC then reverse to chronological order so
-    // threads with >100 messages always show the latest conversation instead of
-    // getting stuck on the oldest 100.
-    const { data, error } = await supabase
-      .from("messages")
-      .select("id, sender_id, receiver_id, content, ciphertext, nonce, sender_ratchet_public_key, ephemeral_public_key, message_number, previous_chain_length, is_read, created_at")
-      .or(
-        `and(sender_id.eq.${userId},receiver_id.eq.${peerId}),and(sender_id.eq.${peerId},receiver_id.eq.${userId})`
-      )
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(limit);
-    if (error) throw error;
+    // Fetch newest `limit` messages DESC and peer public key in parallel
+    const [msgsRes, keyRes] = await Promise.all([
+      supabase
+        .from("messages")
+        .select("id, sender_id, receiver_id, content, ciphertext, nonce, sender_ratchet_public_key, ephemeral_public_key, message_number, previous_chain_length, is_read, created_at")
+        .or(
+          `and(sender_id.eq.${userId},receiver_id.eq.${peerId}),and(sender_id.eq.${peerId},receiver_id.eq.${userId})`
+        )
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(limit),
+      supabase
+        .from("user_keys")
+        .select("identity_public_key")
+        .eq("user_id", peerId)
+        .maybeSingle(),
+    ]);
+    if (msgsRes.error) throw msgsRes.error;
 
-    const rows = (data || []).reverse();
+    const rows = (msgsRes.data || []).reverse();
 
     // Only issue the UPDATE write when there are actually unread incoming messages
     // (saves a DB write on every 4s chat poll).
@@ -171,7 +176,10 @@ router.get("/:peerId", requireAuth, async (req, res, next) => {
       if (readErr) console.error("Failed to mark messages as read:", readErr.message);
     }
 
-    res.json({ data: rows });
+    res.json({
+      data: rows,
+      peer_identity_public_key: keyRes.data?.identity_public_key || null,
+    });
   } catch (err) {
     next(err);
   }
