@@ -96,7 +96,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
   try {
     const { data, error } = await supabase
       .from("users")
-      .select("id, email, role, user_profiles(*)")
+      .select("id, email, role, password_hash, user_profiles(*)")
       .eq("id", req.user.userId)
       .maybeSingle();
     if (error) throw error;
@@ -104,7 +104,13 @@ router.get("/me", requireAuth, async (req, res, next) => {
 
     const rawProfile = data.user_profiles;
     const profile = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) || {};
-    res.json({ ...profile, id: data.id, email: data.email, role: data.role });
+    res.json({
+      ...profile,
+      id: data.id,
+      email: data.email,
+      role: data.role,
+      has_password: typeof data.password_hash === "string" && data.password_hash.startsWith("$2"),
+    });
   } catch (err) {
     next(err);
   }
@@ -130,6 +136,28 @@ router.put("/me", requireAuth, async (req, res, next) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ error: "Profil tidak ditemukan" });
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -- DELETE /api/users/me -------------------------------------------------
+router.delete("/me", requireAuth, async (req, res, next) => {
+  try {
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("id, refresh_token")
+      .eq("id", req.user.userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!user) return res.status(404).json({ error: "User tidak ditemukan" });
+    if (!user.refresh_token) {
+      return res.status(401).json({ error: "Sesi sudah berakhir. Silakan masuk kembali." });
+    }
+
+    const { error: delErr } = await supabase.from("users").delete().eq("id", user.id);
+    if (delErr) throw delErr;
+    res.json({ message: "Akun berhasil dihapus" });
   } catch (err) {
     next(err);
   }

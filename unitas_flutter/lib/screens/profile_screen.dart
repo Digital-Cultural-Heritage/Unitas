@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/api/api_client.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/users_service.dart';
@@ -8,6 +9,7 @@ import '../core/api/posts_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import 'edit_profile_screen.dart';
+import 'login_screen.dart';
 import 'post_detail_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -43,6 +45,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _privacyShowEmail = false;
   bool _privacyAllowConnect = true;
   String _language = 'Bahasa Indonesia';
+
+  bool get _hasPassword => _profile?['has_password'] != false;
 
   @override
   void initState() {
@@ -164,6 +168,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       await AuthService.logout();
       if (mounted) widget.onLogout();
+    } finally {
+      _loggingOut = false;
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    if (_loggingOut) return;
+    _loggingOut = true;
+    try {
+      final deleted = await showDeleteAccountDialog(
+        context: context,
+        onConfirm: AuthService.deleteAccount,
+      );
+      if (deleted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Akun berhasil dihapus')),
+        );
+        widget.onLogout();
+      }
     } finally {
       _loggingOut = false;
     }
@@ -571,7 +594,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: SingleChildScrollView(
                 controller: scrollController,
                 padding: const EdgeInsets.fromLTRB(22, 16, 22, 28),
-                child: _buildPengaturan(),
+                child: StatefulBuilder(
+                  builder: (sheetCtx, setSheet) => _buildPengaturan(
+                    onRefreshSheet: () {
+                      if (sheetCtx.mounted) setSheet(() {});
+                    },
+                  ),
+                ),
               ),
             ),
           ],
@@ -1083,7 +1112,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _openChangePasswordSheet() async {
+  Future<void> _openChangePasswordSheet({VoidCallback? onRefreshSheet}) async {
+    if (!_hasPassword) {
+      final created = await showSetPasswordSheet(
+        context: context,
+        email: _profile?['email']?.toString(),
+        isPostLoginPrompt: false,
+      );
+      if (created && mounted) {
+        setState(() {
+          _profile = {...?_profile, 'has_password': true};
+        });
+        onRefreshSheet?.call();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk dengan email.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -1303,13 +1354,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildPengaturan() {
+  Widget _buildPengaturan({VoidCallback? onRefreshSheet}) {
     final groups = [
       {
         'title': 'Akun',
         'items': [
           {'label': 'Edit Profil', 'icon': Icons.person_outline, 'onTap': _openEditProfile},
-          {'label': 'Ubah Kata Sandi', 'icon': Icons.lock_outline, 'onTap': _openChangePasswordSheet},
+          {
+            'label': _hasPassword ? 'Ubah Kata Sandi' : 'Buat Kata Sandi',
+            'icon': Icons.lock_outline,
+            if (!_hasPassword) 'trailing': 'Belum dibuat',
+            'onTap': () => _openChangePasswordSheet(onRefreshSheet: onRefreshSheet),
+          },
           {'label': 'Privasi & Keamanan', 'icon': Icons.shield_outlined, 'onTap': _openPrivacySheet},
         ],
       },
@@ -1326,6 +1382,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           {'label': 'Bantuan & Dukungan', 'icon': Icons.help_outline, 'onTap': _openHelpSheet},
           {'label': 'Tentang Aplikasi', 'icon': Icons.info_outline, 'onTap': _openAboutSheet},
           {'label': 'Keluar', 'icon': Icons.logout, 'danger': true, 'onTap': _logout},
+          {
+            'label': 'Hapus Akun',
+            'icon': Icons.delete_forever_outlined,
+            'danger': true,
+            'onTap': _deleteAccount,
+          },
         ],
       },
     ];
@@ -1496,6 +1558,122 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+Future<bool> showDeleteAccountDialog({
+  required BuildContext context,
+  required Future<void> Function() onConfirm,
+}) async {
+  final deleted = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _DeleteAccountDialog(onConfirm: onConfirm),
+  );
+  return deleted == true;
+}
+
+class _DeleteAccountDialog extends StatefulWidget {
+  final Future<void> Function() onConfirm;
+  const _DeleteAccountDialog({required this.onConfirm});
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final _confirmCtrl = TextEditingController();
+  bool _canDelete = false;
+  bool _busy = false;
+  String? _errMsg;
+
+  @override
+  void dispose() {
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_canDelete || _busy) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _errMsg = null;
+    });
+    try {
+      await widget.onConfirm();
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _errMsg = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errMsg = 'Gagal menghapus akun. Cek koneksi kamu.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        backgroundColor: surface,
+        title: Text('Hapus Akun Permanen?', style: heading.copyWith(fontSize: 18)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Semua data profil, postingan, koneksi, dan pesan akan dihapus permanen. Ketik HAPUS untuk mengonfirmasi.',
+              style: body.copyWith(fontSize: 13.5),
+            ),
+            const SizedBox(height: 12),
+            if (_errMsg != null) ...[
+              Text(
+                _errMsg!,
+                style: caption.copyWith(color: const Color(0xFFDC2626)),
+              ),
+              const SizedBox(height: 8),
+            ],
+            TextField(
+              controller: _confirmCtrl,
+              enabled: !_busy,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(hintText: 'Ketik HAPUS'),
+              onChanged: (v) {
+                final next = v.trim().toUpperCase() == 'HAPUS';
+                if (next != _canDelete) setState(() => _canDelete = next);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.pop(context, false),
+            child: Text('Batal', style: caption.copyWith(color: dim1)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              elevation: 0,
+            ),
+            onPressed: (!_canDelete || _busy) ? null : _submit,
+            child: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  )
+                : Text('Hapus Akun', style: caption.copyWith(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }

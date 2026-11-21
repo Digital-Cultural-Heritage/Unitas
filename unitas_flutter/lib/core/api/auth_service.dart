@@ -44,18 +44,13 @@ class AuthService {
   static Future<Map<String, dynamic>> sendOtp({
     required String email,
     String purpose = 'register',
-    String? password,
   }) async {
-    final body = <String, dynamic>{
-      'email': email.trim(),
-      'purpose': purpose,
-    };
-    if (password != null && password.isNotEmpty) {
-      body['password'] = password;
-    }
     final res = await ApiClient.post(
       '/api/auth/send-otp',
-      body: body,
+      body: {
+        'email': email.trim(),
+        'purpose': purpose,
+      },
       auth: false,
     );
     if (res is! Map) {
@@ -66,28 +61,16 @@ class AuthService {
 
   static Future<Map<String, dynamic>> login(
     String email,
-    String password, {
-    String? otp,
-    String? otpToken,
-  }) async {
-    final body = <String, dynamic>{
-      'email': email.trim(),
-      'password': password,
-    };
-    if (otp != null && otp.trim().isNotEmpty) {
-      body['otp'] = otp.trim();
-    }
-    if (otpToken != null && otpToken.isNotEmpty) {
-      body['otp_token'] = otpToken;
-    }
+    String password,
+  ) async {
     final res = await ApiClient.post(
       '/api/auth/login',
-      body: body,
+      body: {
+        'email': email.trim(),
+        'password': password,
+      },
       auth: false,
     );
-    if (res is Map && res['require_otp'] == true) {
-      return Map<String, dynamic>.from(res);
-    }
     await _saveSession(res);
     return Map<String, dynamic>.from(res as Map);
   }
@@ -223,6 +206,12 @@ class AuthService {
     }
   }
 
+  static Future<void> deleteAccount() async {
+    await ApiClient.delete('/api/users/me');
+    await ApiClient.clearSession();
+    await signOutGoogleQuietly();
+  }
+
   static Future<void> signOutGoogleQuietly() async {
     try {
       await ensureGoogleInitialized();
@@ -315,6 +304,18 @@ class AuthService {
   }
 
   // ── Password management ────────────────────────────────────────────────
+  static Future<void> setPassword(String newPassword) async {
+    await ApiClient.post(
+      '/api/auth/set-password',
+      body: {'new_password': newPassword},
+    );
+    final stored = await getStoredUser();
+    if (stored != null) {
+      stored['has_password'] = true;
+      await ApiClient.saveStoredUserJson(jsonEncode(stored));
+    }
+  }
+
   static Future<void> changePassword({
     required String currentPassword,
     required String newPassword,

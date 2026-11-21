@@ -181,9 +181,8 @@ function safeEqual(a, b) {
 function isMissingColumn(err, col) {
   return Boolean(
     err &&
-      (err.code === "42703" ||
-        err.code === "PGRST204" ||
-        (typeof err.message === "string" && err.message.includes(col)))
+      (err.code === "42703" || err.code === "PGRST204") &&
+      (!err.message || err.message.includes(col))
   );
 }
 
@@ -217,6 +216,7 @@ function sessionResponse({ accessToken, refreshToken }, user, profile) {
       role: user.role,
       full_name: profile.full_name ?? null,
       avatar_url: profile.avatar_url ?? null,
+      has_password: hasPassword(user.password_hash),
     },
   };
 }
@@ -235,35 +235,17 @@ router.post(
       }
 
       const purpose = req.body.purpose === undefined ? "register" : String(req.body.purpose).trim();
-      if (purpose !== "register" && purpose !== "login") {
+      if (purpose !== "register") {
         return res.status(400).json({ error: "Purpose OTP tidak valid" });
       }
 
-      if (purpose === "register") {
-        const { data: existing, error } = await supabase
-          .from("users")
-          .select("id")
-          .eq("email", email)
-          .maybeSingle();
-        if (error) throw error;
-        if (existing) return res.status(409).json({ error: "Email sudah terdaftar" });
-      } else {
-        const password = req.body.password;
-        if (typeof password !== "string" || !password) {
-          return res.status(400).json({ error: "Password wajib diisi" });
-        }
-        const { data: user, error } = await supabase
-          .from("users")
-          .select("id, email, password_hash, role")
-          .eq("email", email)
-          .maybeSingle();
-        if (error) throw error;
-        const match = await bcrypt.compare(
-          password,
-          user && hasPassword(user.password_hash) ? user.password_hash : DUMMY_HASH
-        );
-        if (!user || !match) return res.status(401).json({ error: "Email atau password salah" });
-      }
+      const { data: existing, error } = await supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .maybeSingle();
+      if (error) throw error;
+      if (existing) return res.status(409).json({ error: "Email sudah terdaftar" });
 
       const { otpCode, otpToken } = issueEmailOtp(email, purpose);
       let mailResult;
@@ -353,7 +335,14 @@ router.post(
         message: "Registrasi berhasil",
         access_token: accessToken,
         refresh_token: refreshToken,
-        user: { id: user.id, email: user.email, role: user.role, full_name, avatar_url: null },
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          full_name,
+          avatar_url: null,
+          has_password: true,
+        },
       });
     } catch (err) {
       next(err);
@@ -409,7 +398,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
     const { data: user, error } = await supabase
       .from("users")
       .select(
-        "id, email, role, user_profiles(full_name, initials, avatar_url, bio, prodi, angkatan, kota, pekerjaan, perusahaan, linkedin, points, is_online)"
+        "id, email, role, password_hash, user_profiles(full_name, initials, avatar_url, bio, prodi, angkatan, kota, pekerjaan, perusahaan, linkedin, points, is_online)"
       )
       .eq("id", req.user.userId)
       .maybeSingle();
@@ -424,6 +413,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
       role: user.role,
       full_name: profile.full_name ?? null,
       avatar_url: profile.avatar_url ?? null,
+      has_password: hasPassword(user.password_hash),
     });
   } catch (err) {
     next(err);
@@ -462,8 +452,8 @@ async function verifyGoogleIdToken(idToken, audience) {
   return ticket.getPayload();
 }
 
-const USER_COLS = "id, email, role, google_sub, user_profiles(full_name, avatar_url)";
-const USER_COLS_LEGACY = "id, email, role, user_profiles(full_name, avatar_url)";
+const USER_COLS = "id, email, role, password_hash, google_sub, user_profiles(full_name, avatar_url)";
+const USER_COLS_LEGACY = "id, email, role, password_hash, user_profiles(full_name, avatar_url)";
 
 async function findUserByGoogleOrEmail(sub, email) {
   let { data, error } = await supabase.from("users").select(USER_COLS).eq("google_sub", sub).maybeSingle();
@@ -540,7 +530,7 @@ router.post(
 
       if (!user) {
         const fullName = String(claims.name || email.split("@")[0]).slice(0, 100);
-        const created = { id: crypto.randomUUID(), email, role: "alumni" };
+        const created = { id: crypto.randomUUID(), email, role: "alumni", password_hash: NO_PASSWORD };
         let { error: insErr } = await supabase
           .from("users")
           .insert({ id: created.id, email, password_hash: NO_PASSWORD, role: created.role, google_sub: sub });
@@ -637,7 +627,7 @@ router.post("/refresh", authLimiter(), async (req, res, next) => {
 });
 
 // ── POST /api/auth/logout ─────────────────────────────────────────────────
-router.post("/logout", async (req, res, next) => {
+router.post("/logout", authLimiter(), async (req, res, next) => {
   try {
     const refresh_token = req.body && req.body.refresh_token;
     if (refresh_token && typeof refresh_token === "string") {
@@ -652,6 +642,63 @@ router.post("/logout", async (req, res, next) => {
     next(err);
   }
 });
+
+// ── POST /api/auth/set-password ───────────────────────────────────────────
+router.post(
+  "/set-password",
+  requireAuth,
+  otpLimiter(10),
+  [
+    body("new_password")
+      .isString()
+      .isLength({ min: 8 })
+      .withMessage("Password baru minimal 8 karakter")
+      .bail()
+      .custom((v) => Buffer.byteLength(v, "utf8") <= 72)
+      .withMessage("Password baru maksimal 72 karakter"),
+  ],
+  async (req, res, next) => {
+    if (!validate(req, res)) return;
+    try {
+      const { new_password } = req.body;
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("id, password_hash, refresh_token")
+        .eq("id", req.user.userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!user) return res.status(404).json({ error: "User tidak ditemukan" });
+      if (!user.refresh_token) {
+        return res.status(401).json({ error: "Sesi sudah berakhir. Silakan masuk kembali." });
+      }
+
+      if (hasPassword(user.password_hash)) {
+        return res.status(400).json({
+          error: "Akun ini sudah memiliki kata sandi. Gunakan menu Ubah Kata Sandi.",
+        });
+      }
+
+      const password_hash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
+      // Pertahankan refresh_token agar sesi login Google yang baru saja dibuat tetap aktif
+      const { data: updated, error: updErr } = await supabase
+        .from("users")
+        .update({ password_hash })
+        .eq("id", user.id)
+        .eq("password_hash", user.password_hash)
+        .select("id");
+      if (updErr) throw updErr;
+      if (!updated || updated.length === 0) {
+        return res.status(409).json({
+          error: "Akun ini sudah memiliki kata sandi. Gunakan menu Ubah Kata Sandi.",
+        });
+      }
+
+      res.json({ message: "Kata sandi berhasil dibuat", has_password: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // ── POST /api/auth/change-password ────────────────────────────────────────
 router.post(
@@ -674,15 +721,19 @@ router.post(
       const { current_password, new_password } = req.body;
       const { data: user, error } = await supabase
         .from("users")
-        .select("id, password_hash")
+        .select("id, password_hash, refresh_token")
         .eq("id", req.user.userId)
         .maybeSingle();
       if (error) throw error;
       if (!user) return res.status(404).json({ error: "User tidak ditemukan" });
+      if (!user.refresh_token) {
+        return res.status(401).json({ error: "Sesi sudah berakhir. Silakan masuk kembali." });
+      }
 
       if (!hasPassword(user.password_hash)) {
         return res.status(400).json({
-          error: "Akun ini masuk dengan Google dan belum punya password. Gunakan 'Lupa password' untuk membuatnya.",
+          error:
+            "Akun ini masuk dengan Google dan belum punya kata sandi. Gunakan menu Buat Kata Sandi terlebih dahulu.",
         });
       }
 
@@ -753,11 +804,12 @@ router.post(
       });
       if (insErr) throw insErr;
 
-      let mailResult = { sent: false };
+      let mailResult;
       try {
         mailResult = await sendOtpEmail({ to: user.email, otpCode, purpose: "reset" });
       } catch (e) {
         console.error("Send OTP email error:", e.message);
+        return res.status(502).json({ error: "Gagal mengirim email OTP. Silakan coba lagi." });
       }
 
       const payload = { message: "Jika email terdaftar, kode OTP telah dikirim" };

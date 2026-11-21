@@ -7,6 +7,7 @@ import 'package:unitas_flutter/core/theme/colors.dart';
 import 'package:unitas_flutter/core/utils/image_validator.dart';
 import 'package:unitas_flutter/core/utils/json_utils.dart';
 import 'package:unitas_flutter/screens/login_screen.dart';
+import 'package:unitas_flutter/screens/profile_screen.dart';
 import 'package:unitas_flutter/widgets/avatar.dart';
 
 void main() {
@@ -49,6 +50,148 @@ void main() {
     expect(AuthService.isAllowedUnudEmail('mahasiswa@student.unud.ac.id'), isTrue);
     expect(AuthService.isAllowedUnudEmail('dosen@unud.ac.id'), isTrue);
     expect(AuthService.isAllowedUnudEmail('outsider@gmail.com'), isFalse);
+  });
+
+  testWidgets('showSetPasswordSheet validates, shows server errors for retry, and handles skip', (WidgetTester tester) async {
+    String? savedPassword;
+    bool? sheetResult;
+    var shouldFailSave = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () async {
+                  sheetResult = await showSetPasswordSheet(
+                    context: context,
+                    email: 'siti@student.unud.ac.id',
+                    isPostLoginPrompt: true,
+                    onSave: (pw) async {
+                      if (shouldFailSave) {
+                        throw const ApiException('Gagal menyimpan di server', 500);
+                      }
+                      savedPassword = pw;
+                    },
+                  );
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Buat Kata Sandi'), findsOneWidget);
+    expect(find.textContaining('siti@student.unud.ac.id'), findsOneWidget);
+    expect(find.text('Simpan Kata Sandi'), findsOneWidget);
+    expect(find.text('Lewati dulu'), findsOneWidget);
+
+    // Rejects short password & mismatched confirmation
+    await tester.enterText(find.byType(TextFormField).at(0), '123');
+    await tester.enterText(find.byType(TextFormField).at(1), '456');
+    await tester.ensureVisible(find.text('Simpan Kata Sandi'));
+    await tester.tap(find.text('Simpan Kata Sandi'));
+    await tester.pump();
+
+    expect(find.text('Password minimal 8 karakter'), findsOneWidget);
+    expect(find.text('Konfirmasi kata sandi tidak cocok'), findsOneWidget);
+    expect(savedPassword, isNull);
+
+    // Shows ApiException error, keeps sheet open, and allows retry to succeed
+    shouldFailSave = true;
+    await tester.enterText(find.byType(TextFormField).at(0), 'Password123');
+    await tester.enterText(find.byType(TextFormField).at(1), 'Password123');
+    await tester.ensureVisible(find.text('Simpan Kata Sandi'));
+    await tester.tap(find.text('Simpan Kata Sandi'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gagal menyimpan di server'), findsOneWidget);
+    expect(find.text('Buat Kata Sandi'), findsOneWidget);
+
+    shouldFailSave = false;
+    await tester.ensureVisible(find.text('Simpan Kata Sandi'));
+    await tester.tap(find.text('Simpan Kata Sandi'));
+    await tester.pumpAndSettle();
+
+    expect(savedPassword, 'Password123');
+    expect(sheetResult, isTrue);
+    expect(find.text('Buat Kata Sandi'), findsNothing);
+
+    // Tapping "Lewati dulu" closes with false without calling onSave
+    savedPassword = null;
+    sheetResult = null;
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Lewati dulu'));
+    await tester.tap(find.text('Lewati dulu'));
+    await tester.pumpAndSettle();
+
+    expect(savedPassword, isNull);
+    expect(sheetResult, isFalse);
+  });
+
+  testWidgets('showDeleteAccountDialog requires typing HAPUS, surfaces ApiException, and pops true on retry', (WidgetTester tester) async {
+    var failFirst = true;
+    var calls = 0;
+    bool? dialogResult;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () async {
+                  dialogResult = await showDeleteAccountDialog(
+                    context: context,
+                    onConfirm: () async {
+                      calls++;
+                      if (failFirst) {
+                        throw const ApiException('Server gagal menghapus akun', 500);
+                      }
+                    },
+                  );
+                },
+                child: const Text('OpenDelete'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('OpenDelete'));
+    await tester.pumpAndSettle();
+
+    // Button stays disabled before typing HAPUS
+    await tester.tap(find.text('Hapus Akun'));
+    await tester.pump();
+    expect(calls, 0);
+
+    // Typing "hapus" enables button; first attempt shows error and stays open
+    await tester.enterText(find.byType(TextField), 'hapus');
+    await tester.pump();
+    await tester.tap(find.text('Hapus Akun'));
+    await tester.pumpAndSettle();
+
+    expect(calls, 1);
+    expect(find.text('Server gagal menghapus akun'), findsOneWidget);
+    expect(find.text('Hapus Akun Permanen?'), findsOneWidget);
+
+    // Retry succeeds and pops with true
+    failFirst = false;
+    await tester.tap(find.text('Hapus Akun'));
+    await tester.pumpAndSettle();
+
+    expect(calls, 2);
+    expect(dialogResult, isTrue);
+    expect(find.text('Hapus Akun Permanen?'), findsNothing);
   });
 
   group('json_utils', () {

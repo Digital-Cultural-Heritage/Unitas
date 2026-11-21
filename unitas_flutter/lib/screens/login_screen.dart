@@ -45,6 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
             },
             onError: (Object err) {
               if (!mounted) return;
+              if (err is GoogleSignInException &&
+                  err.code == GoogleSignInExceptionCode.canceled) {
+                return;
+              }
               final msg = err is GoogleSignInException
                   ? AuthService.mapGoogleError(err)
                   : 'Gagal masuk dengan Google. Cek koneksi atau coba lagi.';
@@ -73,29 +77,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      final email = _emailCtrl.text.trim();
-      final pass = _passCtrl.text;
-      final res = await AuthService.login(email, pass);
+      await AuthService.login(_emailCtrl.text.trim(), _passCtrl.text);
       if (!mounted) return;
-      if (res['require_otp'] == true) {
-        final verified = await showEmailOtpSheet(
-          context: context,
-          email: email,
-          title: 'Verifikasi Login',
-          subtitle: 'Masukkan kode OTP 6 digit yang dikirim ke email kampusmu.',
-          initialOtpToken: res['otp_token']?.toString(),
-          initialDevOtp: res['dev_otp']?.toString(),
-          onVerify: (otp, otpToken) async {
-            await AuthService.login(email, pass, otp: otp, otpToken: otpToken);
-          },
-          onResend: () => AuthService.sendOtp(
-            email: email,
-            purpose: 'login',
-            password: pass,
-          ),
-        );
-        if (!mounted || !verified) return;
-      }
       widget.onLoginSuccess();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -128,6 +111,26 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final session = await action();
       if (!mounted || session == null) return;
+      final user = session['user'];
+      final needsPassword = user is Map && user['has_password'] == false;
+      if (needsPassword) {
+        final saved = await showSetPasswordSheet(
+          context: context,
+          email: user['email']?.toString(),
+          isPostLoginPrompt: true,
+        );
+        if (!mounted) return;
+        if (saved) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk dengan email.',
+              ),
+            ),
+          );
+        }
+      }
+      if (!await AuthService.isLoggedIn() || !mounted) return;
       widget.onLoginSuccess();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -431,15 +434,35 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   bool _otpSent = false;
   bool _busy = false;
   bool _obscurePass = true;
+  int _cooldown = 0;
+  Timer? _timer;
   String? _devOtpHint;
   String? _errMsg;
 
   @override
   void dispose() {
+    _timer?.cancel();
     _emailCtrl.dispose();
     _otpCtrl.dispose();
     _newPassCtrl.dispose();
     super.dispose();
+  }
+
+  void _startCooldown() {
+    _timer?.cancel();
+    setState(() => _cooldown = 60);
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (_cooldown <= 1) {
+        t.cancel();
+        setState(() => _cooldown = 0);
+      } else {
+        setState(() => _cooldown--);
+      }
+    });
   }
 
   Future<void> _submit() async {
@@ -458,6 +481,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           _otpSent = true;
           _devOtpHint = res['dev_otp']?.toString();
         });
+        _startCooldown();
       } else {
         await AuthService.resetPassword(
           email: _emailCtrl.text.trim(),
@@ -473,6 +497,29 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _errMsg = 'Tidak dapat terhubung ke server.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resendOtp() async {
+    if (_busy || _cooldown > 0) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _errMsg = null;
+    });
+    try {
+      final res = await AuthService.forgotPassword(_emailCtrl.text.trim());
+      if (!mounted) return;
+      setState(() => _devOtpHint = res['dev_otp']?.toString());
+      _startCooldown();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _errMsg = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errMsg = 'Gagal mengirim ulang OTP.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -604,7 +651,239 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                         style: buttonStyle,
                       ),
               ),
+              if (_otpSent) ...[
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: (_busy || _cooldown > 0) ? null : _resendOtp,
+                  child: Text(
+                    _cooldown > 0
+                        ? 'Kirim Ulang OTP ($_cooldown dtk)'
+                        : 'Kirim Ulang OTP',
+                    style: caption.copyWith(
+                      color: _cooldown > 0 ? dim2 : brandNavy,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<bool> showSetPasswordSheet({
+  required BuildContext context,
+  String? email,
+  bool isPostLoginPrompt = false,
+  Future<void> Function(String newPassword)? onSave,
+}) async {
+  final saved = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    isDismissible: !isPostLoginPrompt,
+    enableDrag: !isPostLoginPrompt,
+    backgroundColor: brandBg,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => _SetPasswordSheet(
+      email: email,
+      isPostLoginPrompt: isPostLoginPrompt,
+      onSave: onSave ?? AuthService.setPassword,
+    ),
+  );
+  return saved == true;
+}
+
+class _SetPasswordSheet extends StatefulWidget {
+  final String? email;
+  final bool isPostLoginPrompt;
+  final Future<void> Function(String newPassword) onSave;
+
+  const _SetPasswordSheet({
+    this.email,
+    required this.isPostLoginPrompt,
+    required this.onSave,
+  });
+
+  @override
+  State<_SetPasswordSheet> createState() => _SetPasswordSheetState();
+}
+
+class _SetPasswordSheetState extends State<_SetPasswordSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _passCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+
+  bool _busy = false;
+  bool _obscurePass = true;
+  bool _obscureConfirm = true;
+  String? _errMsg;
+
+  @override
+  void dispose() {
+    _passCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _errMsg = null;
+    });
+    try {
+      await widget.onSave(_passCtrl.text);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _errMsg = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errMsg = 'Tidak dapat terhubung ke server.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanEmail = widget.email?.trim() ?? '';
+    final subtitleText = cleanEmail.isNotEmpty
+        ? 'Akun Google ($cleanEmail) belum memiliki kata sandi. Buat kata sandi sekarang agar kamu juga bisa masuk pakai email dan kata sandi.'
+        : 'Akun Google kamu belum memiliki kata sandi. Buat kata sandi sekarang agar kamu juga bisa masuk pakai email dan kata sandi.';
+
+    return PopScope(
+      canPop: !_busy,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            MediaQuery.viewInsetsOf(context).bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Buat Kata Sandi',
+                    style: heading.copyWith(fontSize: 18),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(subtitleText, style: caption),
+                  const SizedBox(height: 16),
+                  if (_errMsg != null) ...[
+                    AuthErrorBanner(message: _errMsg!),
+                    const SizedBox(height: 12),
+                  ],
+                  TextFormField(
+                    controller: _passCtrl,
+                    enabled: !_busy,
+                    obscureText: _obscurePass,
+                    autofillHints: const [AutofillHints.newPassword],
+                    textInputAction: TextInputAction.next,
+                    decoration: authInputDecoration(
+                      'Kata sandi baru (min 8 karakter)',
+                      Icons.lock_outline,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePass
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: dim2,
+                          size: 18,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscurePass = !_obscurePass),
+                      ),
+                    ),
+                    validator: (v) =>
+                        validateAuthPassword(v, checkMaxBytes: true),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _confirmCtrl,
+                    enabled: !_busy,
+                    obscureText: _obscureConfirm,
+                    autofillHints: const [AutofillHints.newPassword],
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _submit(),
+                    decoration: authInputDecoration(
+                      'Konfirmasi kata sandi',
+                      Icons.lock_outline,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureConfirm
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: dim2,
+                          size: 18,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscureConfirm = !_obscureConfirm),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return 'Konfirmasi kata sandi wajib diisi';
+                      }
+                      if (v != _passCtrl.text) {
+                        return 'Konfirmasi kata sandi tidak cocok';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: brandNavy,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    onPressed: _busy ? null : _submit,
+                    child: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text('Simpan Kata Sandi', style: buttonStyle),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed:
+                        _busy ? null : () => Navigator.pop(context, false),
+                    child: Text(
+                      widget.isPostLoginPrompt ? 'Lewati dulu' : 'Batal',
+                      style: caption.copyWith(
+                        color: dim2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

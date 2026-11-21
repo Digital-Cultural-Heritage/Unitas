@@ -797,6 +797,26 @@ describe("Unitas API Routes (posts, events, jobs, messages, notifications, users
     );
   });
 
+  it("DELETE /api/users/me rejects logged-out tokens with 401, deletes active user, and returns 404 after", async () => {
+    const loggedOutRes = await request("DELETE", "/api/users/me", null, {
+      Authorization: `Bearer ${tokenC}`,
+    });
+    assert.equal(loggedOutRes.status, 401);
+    assert.ok(db.tables.users.some((u) => u.id === userC));
+
+    db.tables.users.find((u) => u.id === userC).refresh_token = "active-rt";
+    const okRes = await request("DELETE", "/api/users/me", null, {
+      Authorization: `Bearer ${tokenC}`,
+    });
+    assert.equal(okRes.status, 200);
+    assert.equal(db.tables.users.some((u) => u.id === userC), false);
+
+    const missingRes = await request("DELETE", "/api/users/me", null, {
+      Authorization: `Bearer ${tokenC}`,
+    });
+    assert.equal(missingRes.status, 404);
+  });
+
   it("stats returns counts and propagates DB errors as 500", async () => {
     const ok = await request("GET", "/api/stats");
     assert.equal(ok.status, 200);

@@ -13,6 +13,7 @@ process.env.BCRYPT_ROUNDS = process.env.BCRYPT_ROUNDS || "4";
 const app = require("../api/index");
 const supabase = require("../src/lib/supabase");
 const jwtLib = require("../src/lib/jwt");
+const jwt = require("jsonwebtoken");
 
 let server;
 let baseUrl;
@@ -322,8 +323,10 @@ describe("Unitas Backend API", () => {
 
   it("Protected endpoints reject unauthenticated requests with 401", async () => {
     const sampleId = "11111111-1111-4111-8111-111111111111";
-    const [meRes, postsRes, notifRes, msgRes, jobsRes, appliedRes, applyRes, applicantsRes, statusRes, cvRes] = await Promise.all([
+    const [meRes, delMeRes, setPwRes, postsRes, notifRes, msgRes, jobsRes, appliedRes, applyRes, applicantsRes, statusRes, cvRes] = await Promise.all([
       request("GET", "/api/auth/me"),
+      request("DELETE", "/api/users/me"),
+      request("POST", "/api/auth/set-password", { new_password: "Password123" }),
       request("POST", "/api/posts", { content: "Halo" }),
       request("GET", "/api/notifications"),
       request("GET", "/api/messages/conversations"),
@@ -335,6 +338,8 @@ describe("Unitas Backend API", () => {
       request("POST", "/api/upload/cv", {}),
     ]);
     assert.equal(meRes.status, 401);
+    assert.equal(delMeRes.status, 401);
+    assert.equal(setPwRes.status, 401);
     assert.equal(postsRes.status, 401);
     assert.equal(notifRes.status, 401);
     assert.equal(msgRes.status, 401);
@@ -463,6 +468,7 @@ describe("Unitas Backend API", () => {
       assert.equal(reg.body.user.email, "budi@student.unud.ac.id");
       assert.equal(reg.body.user.full_name, "Budi Santoso");
       assert.equal(reg.body.user.avatar_url, null);
+      assert.equal(reg.body.user.has_password, true);
 
       // Duplicate email -> 409 on both /send-otp and /register (concurrent race)
       const dupOtp = await request("POST", "/api/auth/send-otp", {
@@ -505,8 +511,10 @@ describe("Unitas Backend API", () => {
       assert.deepEqual(Object.keys(login.body).sort(), ["access_token", "refresh_token", "user"]);
       assert.deepEqual(
         Object.keys(login.body.user).sort(),
-        ["avatar_url", "email", "full_name", "id", "role"]
+        ["avatar_url", "email", "full_name", "has_password", "id", "role"]
       );
+      assert.equal(login.body.user.has_password, true);
+      assert.equal(login.body.user.password_hash, undefined);
 
       // GET /api/auth/me
       const me = await request("GET", "/api/auth/me", null, {
@@ -516,6 +524,8 @@ describe("Unitas Backend API", () => {
       assert.equal(me.body.id, login.body.user.id);
       assert.equal(me.body.email, "budi@student.unud.ac.id");
       assert.equal(me.body.full_name, "Budi Santoso");
+      assert.equal(me.body.has_password, true);
+      assert.equal(me.body.password_hash, undefined);
 
       // Refresh rotates token and invalidates the old refresh token
       const refreshed = await request("POST", "/api/auth/refresh", {
@@ -607,10 +617,12 @@ describe("Unitas Backend API", () => {
       assert.deepEqual(Object.keys(createdRes.body).sort(), ["access_token", "refresh_token", "user"]);
       assert.deepEqual(
         Object.keys(createdRes.body.user).sort(),
-        ["avatar_url", "email", "full_name", "id", "role"]
+        ["avatar_url", "email", "full_name", "has_password", "id", "role"]
       );
       assert.equal(createdRes.body.user.full_name, "Siti Alumni");
       assert.equal(createdRes.body.user.avatar_url, "https://lh3.googleusercontent.com/a/avatar");
+      assert.equal(createdRes.body.user.has_password, false);
+      assert.equal(createdRes.body.user.password_hash, undefined);
 
       // Google-only user cannot log in with password
       const passLogin = await request("POST", "/api/auth/login", {
@@ -658,6 +670,7 @@ describe("Unitas Backend API", () => {
       assert.equal(linkedRes.status, 200);
       assert.equal(linkedRes.body.user.full_name, "Manual User");
       assert.equal(linkedRes.body.user.avatar_url, "https://lh3.googleusercontent.com/a/manual");
+      assert.equal(linkedRes.body.user.has_password, true);
       const dbUser = db.tables.users.find((u) => u.email === "manual@unud.ac.id");
       assert.equal(dbUser.google_sub, "google-sub-manual");
     });
@@ -788,11 +801,152 @@ describe("Unitas Backend API", () => {
       assert.equal(gChange.status, 400);
     });
 
-    it("sends OTP via SMTP no-reply when SMTP env is configured", async () => {
+    it("set-password lets a Google-only user create a password, preserves session, and enables email+password login", async () => {
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-setpw-1",
+          email: "setpw@student.unud.ac.id",
+          email_verified: true,
+          name: "Set Password User",
+        }),
+      }));
+      const gRes = await request("POST", "/api/auth/google", { id_token: "g-setpw-tok" });
+      assert.equal(gRes.status, 200);
+      assert.equal(gRes.body.user.has_password, false);
+
+      // Both /api/auth/me and /api/users/me reflect has_password === false without leaking password_hash
+      const authMeBefore = await request("GET", "/api/auth/me", null, {
+        Authorization: `Bearer ${gRes.body.access_token}`,
+      });
+      assert.equal(authMeBefore.status, 200);
+      assert.equal(authMeBefore.body.has_password, false);
+      assert.equal(authMeBefore.body.password_hash, undefined);
+
+      const usersMeBefore = await request("GET", "/api/users/me", null, {
+        Authorization: `Bearer ${gRes.body.access_token}`,
+      });
+      assert.equal(usersMeBefore.status, 200);
+      assert.equal(usersMeBefore.body.has_password, false);
+      assert.equal(usersMeBefore.body.password_hash, undefined);
+
+      // Validation rejects short and >72-byte passwords
+      const shortPw = await request(
+        "POST",
+        "/api/auth/set-password",
+        { new_password: "123" },
+        { Authorization: `Bearer ${gRes.body.access_token}` }
+      );
+      assert.equal(shortPw.status, 400);
+
+      const longPw = await request(
+        "POST",
+        "/api/auth/set-password",
+        { new_password: "a".repeat(73) },
+        { Authorization: `Bearer ${gRes.body.access_token}` }
+      );
+      assert.equal(longPw.status, 400);
+
+      // Logged-out Google-only user's old access token cannot call /set-password
+      await request("POST", "/api/auth/logout", { refresh_token: gRes.body.refresh_token });
+      const loggedOutSetPw = await request(
+        "POST",
+        "/api/auth/set-password",
+        { new_password: "NewPassword123" },
+        { Authorization: `Bearer ${gRes.body.access_token}` }
+      );
+      assert.equal(loggedOutSetPw.status, 401);
+
+      // Re-login with Google restores session and refresh_token
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-setpw-1",
+          email: "setpw@student.unud.ac.id",
+          email_verified: true,
+          name: "Set Password User",
+        }),
+      }));
+      const gRelogin = await request("POST", "/api/auth/google", { id_token: "g-setpw-tok-relogin" });
+      assert.equal(gRelogin.status, 200);
+      assert.equal(gRelogin.body.user.has_password, false);
+
+      // Setting valid password succeeds and keeps current session's refresh token alive
+      const setOk = await request(
+        "POST",
+        "/api/auth/set-password",
+        { new_password: "NewPassword123" },
+        { Authorization: `Bearer ${gRelogin.body.access_token}` }
+      );
+      assert.equal(setOk.status, 200);
+      assert.equal(setOk.body.has_password, true);
+
+      const refreshStillWorks = await request("POST", "/api/auth/refresh", {
+        refresh_token: gRelogin.body.refresh_token,
+      });
+      assert.equal(refreshStillWorks.status, 200);
+      assert.ok(refreshStillWorks.body.access_token);
+
+      // Re-calling /set-password once password exists is blocked with 400
+      const setAgain = await request(
+        "POST",
+        "/api/auth/set-password",
+        { new_password: "AnotherPassword123" },
+        { Authorization: `Bearer ${gRes.body.access_token}` }
+      );
+      assert.equal(setAgain.status, 400);
+
+      // /api/auth/me and /api/users/me now reflect has_password === true without leaking password_hash
+      const authMeAfter = await request("GET", "/api/auth/me", null, {
+        Authorization: `Bearer ${gRes.body.access_token}`,
+      });
+      assert.equal(authMeAfter.status, 200);
+      assert.equal(authMeAfter.body.has_password, true);
+      assert.equal(authMeAfter.body.password_hash, undefined);
+
+      const usersMeAfter = await request("GET", "/api/users/me", null, {
+        Authorization: `Bearer ${gRes.body.access_token}`,
+      });
+      assert.equal(usersMeAfter.status, 200);
+      assert.equal(usersMeAfter.body.has_password, true);
+      assert.equal(usersMeAfter.body.password_hash, undefined);
+
+      // Email + password login works now
+      const emailLogin = await request("POST", "/api/auth/login", {
+        email: "setpw@student.unud.ac.id",
+        password: "NewPassword123",
+      });
+      assert.equal(emailLogin.status, 200);
+      assert.equal(emailLogin.body.user.has_password, true);
+
+      // Google login still works and reports has_password === true
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-setpw-1",
+          email: "setpw@student.unud.ac.id",
+          email_verified: true,
+          name: "Set Password User",
+        }),
+      }));
+      const googleLoginAgain = await request("POST", "/api/auth/google", { id_token: "g-setpw-tok-2" });
+      assert.equal(googleLoginAgain.status, 200);
+      assert.equal(googleLoginAgain.body.user.has_password, true);
+
+      // change-password works using the newly created password
+      const changeOk = await request(
+        "POST",
+        "/api/auth/change-password",
+        { current_password: "NewPassword123", new_password: "ChangedPassword456" },
+        { Authorization: `Bearer ${emailLogin.body.access_token}` }
+      );
+      assert.equal(changeOk.status, 200);
+    });
+
+    it("sends OTP via SMTP no-reply when SMTP env is configured and returns 502 if SMTP fails", async () => {
       const nodemailer = require("nodemailer");
       const sentMails = [];
+      let shouldFailSmtp = false;
       mock.method(nodemailer, "createTransport", () => ({
         sendMail: async (msg) => {
+          if (shouldFailSmtp) throw new Error("SMTP connection refused");
           sentMails.push(msg);
           return { messageId: "smtp-msg-1" };
         },
@@ -821,12 +975,462 @@ describe("Unitas Backend API", () => {
         assert.equal(sentMails[0].to, "smtp.test@student.unud.ac.id");
         assert.equal(sentMails[0].replyTo, "noreply@unud.ac.id");
         assert.match(sentMails[0].text, /\d{6}/);
+
+        // Registered user hitting forgot-password when SMTP fails must receive 502 (not silent 200)
+        db.tables.users.push({
+          id: crypto.randomUUID(),
+          email: "smtp.user@unud.ac.id",
+          password_hash: "$2b$04$dummyhashvalueforunittesting1234567890123456",
+          role: "alumni",
+        });
+        shouldFailSmtp = true;
+        const forgotFail = await request("POST", "/api/auth/forgot-password", {
+          email: "smtp.user@unud.ac.id",
+        });
+        assert.equal(forgotFail.status, 502);
       } finally {
         for (const [k, v] of Object.entries(prev)) {
           if (v === undefined) delete process.env[k];
           else process.env[k] = v;
         }
       }
+    });
+  });
+
+  describe("Auth security & all login scenarios", () => {
+    let db;
+    let googleMock;
+    let secServer;
+    let prevBaseUrl;
+    let savedIndexCache;
+    let savedAuthCache;
+    const savedEnv = {};
+
+    before(async () => {
+      prevBaseUrl = baseUrl;
+      const indexPath = require.resolve("../api/index");
+      const authPath = require.resolve("../src/routes/auth");
+      savedIndexCache = require.cache[indexPath];
+      savedAuthCache = require.cache[authPath];
+      delete require.cache[indexPath];
+      delete require.cache[authPath];
+
+      const secApp = require("../api/index");
+      secServer = secApp.listen(0);
+      await new Promise((resolve) => secServer.once("listening", resolve));
+      const { port } = secServer.address();
+      baseUrl = `http://127.0.0.1:${port}`;
+    });
+
+    after(async () => {
+      if (secServer) await new Promise((resolve) => secServer.close(resolve));
+      baseUrl = prevBaseUrl;
+      const indexPath = require.resolve("../api/index");
+      const authPath = require.resolve("../src/routes/auth");
+      if (savedIndexCache) require.cache[indexPath] = savedIndexCache;
+      else delete require.cache[indexPath];
+      if (savedAuthCache) require.cache[authPath] = savedAuthCache;
+      else delete require.cache[authPath];
+    });
+
+    beforeEach(() => {
+      db = createMockDb();
+      mock.method(supabase, "from", (table) => db.from(table));
+
+      const { OAuth2Client } = require("google-auth-library");
+      googleMock = mock.method(OAuth2Client.prototype, "verifyIdToken", async () => {
+        throw new Error("unexpected verifyIdToken call");
+      });
+
+      savedEnv.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+      savedEnv.GOOGLE_SERVER_CLIENT_IDS = process.env.GOOGLE_SERVER_CLIENT_IDS;
+      savedEnv.SMTP_USER = process.env.SMTP_USER;
+      savedEnv.SMTP_PASS = process.env.SMTP_PASS;
+      process.env.GOOGLE_CLIENT_ID = "web-client-1.apps.googleusercontent.com";
+      process.env.GOOGLE_SERVER_CLIENT_IDS = "extra-client-2.apps.googleusercontent.com";
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+    });
+
+    afterEach(() => {
+      mock.restoreAll();
+      if (savedEnv.GOOGLE_CLIENT_ID === undefined) delete process.env.GOOGLE_CLIENT_ID;
+      else process.env.GOOGLE_CLIENT_ID = savedEnv.GOOGLE_CLIENT_ID;
+      if (savedEnv.GOOGLE_SERVER_CLIENT_IDS === undefined) delete process.env.GOOGLE_SERVER_CLIENT_IDS;
+      else process.env.GOOGLE_SERVER_CLIENT_IDS = savedEnv.GOOGLE_SERVER_CLIENT_IDS;
+      if (savedEnv.SMTP_USER === undefined) delete process.env.SMTP_USER;
+      else process.env.SMTP_USER = savedEnv.SMTP_USER;
+      if (savedEnv.SMTP_PASS === undefined) delete process.env.SMTP_PASS;
+      else process.env.SMTP_PASS = savedEnv.SMTP_PASS;
+    });
+
+    it("JWT forgery, expiry, and token-type confusion are rejected with 401", async () => {
+      // alg:none unsigned token
+      const noneHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+      const nonePayload = Buffer.from(
+        JSON.stringify({ userId: "u-1", email: "a@unud.ac.id", role: "alumni", typ: "access" })
+      ).toString("base64url");
+      const algNoneToken = `${noneHeader}.${nonePayload}.`;
+      const noneRes = await request("GET", "/api/auth/me", null, {
+        Authorization: `Bearer ${algNoneToken}`,
+      });
+      assert.equal(noneRes.status, 401);
+
+      // Token signed with wrong secret
+      const wrongSecretToken = jwt.sign(
+        { userId: "u-1", email: "a@unud.ac.id", role: "alumni", typ: "access" },
+        "wrong-secret-key",
+        { algorithm: "HS256", expiresIn: "1h" }
+      );
+      const wrongRes = await request("GET", "/api/auth/me", null, {
+        Authorization: `Bearer ${wrongSecretToken}`,
+      });
+      assert.equal(wrongRes.status, 401);
+
+      // Expired access token
+      const expiredToken = jwt.sign(
+        { userId: "u-1", email: "a@unud.ac.id", role: "alumni", typ: "access" },
+        process.env.JWT_SECRET,
+        { algorithm: "HS256", expiresIn: -10 }
+      );
+      const expRes = await request("GET", "/api/auth/me", null, {
+        Authorization: `Bearer ${expiredToken}`,
+      });
+      assert.equal(expRes.status, 401);
+
+      // otp_token (signed by JWT_SECRET, typ: "email_otp") rejected as Bearer auth token
+      const otpRes = await request("POST", "/api/auth/send-otp", {
+        email: "jwt.check@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(otpRes.status, 200);
+      const otpAsBearer = await request("GET", "/api/auth/me", null, {
+        Authorization: `Bearer ${otpRes.body.otp_token}`,
+      });
+      assert.equal(otpAsBearer.status, 401);
+    });
+
+    it("Campus domain bypass tricks are blocked across auth endpoints", async () => {
+      const sendOtpBypasses = ["evil@student.unud.ac.id.attacker.com", "evil@fakeunud.ac.id"];
+      for (const email of sendOtpBypasses) {
+        const otpRes = await request("POST", "/api/auth/send-otp", { email, purpose: "register" });
+        assert.equal(otpRes.status, 400);
+      }
+
+      const registerBypasses = ["evil@sub.student.unud.ac.id", '"a@unud.ac.id"@gmail.com'];
+      for (const email of registerBypasses) {
+        const regRes = await request("POST", "/api/auth/register", {
+          email,
+          password: "Password123",
+          full_name: "Evil Bypass",
+          prodi: "TI",
+          angkatan: "2022",
+          otp: "123456",
+        });
+        assert.equal(regRes.status, 400);
+      }
+
+      const allBypasses = [...sendOtpBypasses, ...registerBypasses];
+      for (const email of allBypasses) {
+        const loginRes = await request("POST", "/api/auth/login", { email, password: "Password123" });
+        assert.equal(loginRes.status, 400);
+
+        const forgotRes = await request("POST", "/api/auth/forgot-password", { email });
+        assert.equal(forgotRes.status, 400);
+
+        googleMock.mock.mockImplementationOnce(async () => ({
+          getPayload: () => ({
+            sub: `sub-${email}`,
+            email,
+            email_verified: true,
+            name: "Bypass User",
+          }),
+        }));
+        const gRes = await request("POST", "/api/auth/google", { id_token: `tok-${email}` });
+        assert.equal(gRes.status, 403);
+      }
+    });
+
+    it("OTP abuse, cross-email swap, malformed OTP, lockout, replay, and role escalation are blocked", async () => {
+      // Dead purpose: "login" on /send-otp must be rejected
+      const loginPurposeRes = await request("POST", "/api/auth/send-otp", {
+        email: "alice@student.unud.ac.id",
+        purpose: "login",
+      });
+      assert.equal(loginPurposeRes.status, 400);
+
+      // Issue OTP for Alice
+      const aliceOtp = await request("POST", "/api/auth/send-otp", {
+        email: "alice@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(aliceOtp.status, 200);
+
+      // Using Alice's otp_token to register Bob fails
+      const swapRes = await request("POST", "/api/auth/register", {
+        email: "bob@student.unud.ac.id",
+        password: "Password123",
+        full_name: "Bob",
+        prodi: "SI",
+        angkatan: "2021",
+        otp: aliceOtp.body.dev_otp,
+        otp_token: aliceOtp.body.otp_token,
+      });
+      assert.equal(swapRes.status, 400);
+
+      // Malformed OTP types (array & object) fail cleanly with 400
+      for (const badOtp of [["123", "456"], {}]) {
+        const badOtpRes = await request("POST", "/api/auth/register", {
+          email: "alice@student.unud.ac.id",
+          password: "Password123",
+          full_name: "Alice",
+          prodi: "TI",
+          angkatan: "2022",
+          otp: badOtp,
+          otp_token: aliceOtp.body.otp_token,
+        });
+        assert.equal(badOtpRes.status, 400);
+      }
+
+      // Role escalation attempt (role: "admin") is ignored -> forced to "alumni"
+      const aliceReg = await request("POST", "/api/auth/register", {
+        email: "alice@student.unud.ac.id",
+        password: "Password123",
+        full_name: "Alice",
+        prodi: "TI",
+        angkatan: "2022",
+        role: "admin",
+        otp: aliceOtp.body.dev_otp,
+        otp_token: aliceOtp.body.otp_token,
+      });
+      assert.equal(aliceReg.status, 201);
+      assert.equal(aliceReg.body.user.role, "alumni");
+      assert.equal(db.tables.users.find((u) => u.email === "alice@student.unud.ac.id").role, "alumni");
+
+      // 5 wrong register OTP attempts lock out even the real dev_otp
+      const lockOtp = await request("POST", "/api/auth/send-otp", {
+        email: "lockout@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(lockOtp.status, 200);
+      for (let i = 0; i < 5; i++) {
+        const wrong = await request("POST", "/api/auth/register", {
+          email: "lockout@student.unud.ac.id",
+          password: "Password123",
+          full_name: "Lockout",
+          prodi: "TI",
+          angkatan: "2022",
+          otp: "000000",
+          otp_token: lockOtp.body.otp_token,
+        });
+        assert.equal(wrong.status, 400);
+      }
+      const lockedReal = await request("POST", "/api/auth/register", {
+        email: "lockout@student.unud.ac.id",
+        password: "Password123",
+        full_name: "Lockout",
+        prodi: "TI",
+        angkatan: "2022",
+        otp: lockOtp.body.dev_otp,
+        otp_token: lockOtp.body.otp_token,
+      });
+      assert.equal(lockedReal.status, 400);
+
+      // Replaying an already-used password reset OTP fails with 400
+      const forgot = await request("POST", "/api/auth/forgot-password", {
+        email: "alice@student.unud.ac.id",
+      });
+      assert.equal(forgot.status, 200);
+      const resetOk = await request("POST", "/api/auth/reset-password", {
+        email: "alice@student.unud.ac.id",
+        otp: forgot.body.dev_otp,
+        new_password: "AliceNewPassword1",
+      });
+      assert.equal(resetOk.status, 200);
+      const resetReplay = await request("POST", "/api/auth/reset-password", {
+        email: "alice@student.unud.ac.id",
+        otp: forgot.body.dev_otp,
+        new_password: "AliceReplayPass1",
+      });
+      assert.equal(resetReplay.status, 400);
+    });
+
+    it("Google Sign-In duplicate google_sub (23505) does not fall back to inserting a duplicate row", async () => {
+      let usersInserts = 0;
+      const origFrom = db.from;
+      mock.restoreAll();
+      mock.method(supabase, "from", (table) => {
+        const b = origFrom(table);
+        if (table !== "users") return b;
+        const origInsert = b.insert.bind(b);
+        b.insert = (row) => {
+          usersInserts++;
+          origInsert(row);
+          if (usersInserts === 1) {
+            // Simulate concurrent Google signup winning the race before our insert
+            const winnerId = crypto.randomUUID();
+            db.tables.users.push({
+              id: winnerId,
+              email: "race.google@student.unud.ac.id",
+              password_hash: "!no-password",
+              role: "alumni",
+              google_sub: "dup-sub-1",
+            });
+            db.tables.user_profiles.push({
+              id: crypto.randomUUID(),
+              user_id: winnerId,
+              full_name: "Race Winner",
+              avatar_url: null,
+            });
+            b.then = (resolve) =>
+              resolve({
+                data: null,
+                error: {
+                  code: "23505",
+                  message: 'duplicate key value violates unique constraint "idx_users_google_sub"',
+                },
+              });
+          }
+          return b;
+        };
+        return b;
+      });
+
+      const { OAuth2Client } = require("google-auth-library");
+      googleMock = mock.method(OAuth2Client.prototype, "verifyIdToken", async () => ({
+        getPayload: () => ({
+          sub: "dup-sub-1",
+          email: "race.google@student.unud.ac.id",
+          email_verified: true,
+          name: "Race Winner",
+        }),
+      }));
+
+      const res = await request("POST", "/api/auth/google", { id_token: "dup-sub-tok" });
+      assert.equal(res.status, 200);
+      assert.equal(usersInserts, 1);
+      assert.equal(db.tables.users.length, 1);
+      assert.equal(db.tables.users.filter((u) => !u.google_sub).length, 0);
+    });
+
+    it("Concurrent set-password race, post-logout revocation, and delete -> re-register lifecycle", async () => {
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-race-1",
+          email: "race@student.unud.ac.id",
+          email_verified: true,
+          name: "Race User",
+        }),
+      }));
+      const gRes = await request("POST", "/api/auth/google", { id_token: "g-race-tok" });
+      assert.equal(gRes.status, 200);
+      assert.equal(gRes.body.user.has_password, false);
+
+      // Concurrent set-password calls -> only one succeeds (200), the other loses atomicity check (409)
+      const [sp1, sp2] = await Promise.all([
+        request(
+          "POST",
+          "/api/auth/set-password",
+          { new_password: "RacePassword1" },
+          { Authorization: `Bearer ${gRes.body.access_token}` }
+        ),
+        request(
+          "POST",
+          "/api/auth/set-password",
+          { new_password: "RacePassword1" },
+          { Authorization: `Bearer ${gRes.body.access_token}` }
+        ),
+      ]);
+      assert.deepEqual([sp1.status, sp2.status].sort((a, b) => a - b), [200, 409]);
+
+      // Subsequent set-password fails because password now exists
+      const spAfter = await request(
+        "POST",
+        "/api/auth/set-password",
+        { new_password: "RacePassword1" },
+        { Authorization: `Bearer ${gRes.body.access_token}` }
+      );
+      assert.equal(spAfter.status, 400);
+
+      // After logout, unexpired access_token is rejected (401) across sensitive mutation endpoints
+      const logoutRes = await request("POST", "/api/auth/logout", {
+        refresh_token: gRes.body.refresh_token,
+      });
+      assert.equal(logoutRes.status, 200);
+
+      const authHeaders = { Authorization: `Bearer ${gRes.body.access_token}` };
+      const [outSet, outChange, outDel] = await Promise.all([
+        request("POST", "/api/auth/set-password", { new_password: "RacePassword2" }, authHeaders),
+        request(
+          "POST",
+          "/api/auth/change-password",
+          { current_password: "RacePassword1", new_password: "RacePassword2" },
+          authHeaders
+        ),
+        request("DELETE", "/api/users/me", null, authHeaders),
+      ]);
+      assert.equal(outSet.status, 401);
+      assert.equal(outChange.status, 401);
+      assert.equal(outDel.status, 401);
+      assert.equal(db.tables.users.length, 1);
+
+      // Log back in via email+password, then delete account
+      const loginAgain = await request("POST", "/api/auth/login", {
+        email: "race@student.unud.ac.id",
+        password: "RacePassword1",
+      });
+      assert.equal(loginAgain.status, 200);
+
+      const freshHeaders = { Authorization: `Bearer ${loginAgain.body.access_token}` };
+      const delRes = await request("DELETE", "/api/users/me", null, freshHeaders);
+      assert.equal(delRes.status, 200);
+      assert.equal(db.tables.users.length, 0);
+
+      // Old tokens no longer grant access after deletion
+      const deadRefresh = await request("POST", "/api/auth/refresh", {
+        refresh_token: loginAgain.body.refresh_token,
+      });
+      assert.equal(deadRefresh.status, 401);
+
+      const [deadMe, deadSet, deadChange, deadDel] = await Promise.all([
+        request("GET", "/api/auth/me", null, freshHeaders),
+        request("POST", "/api/auth/set-password", { new_password: "RacePassword2" }, freshHeaders),
+        request(
+          "POST",
+          "/api/auth/change-password",
+          { current_password: "RacePassword1", new_password: "RacePassword2" },
+          freshHeaders
+        ),
+        request("DELETE", "/api/users/me", null, freshHeaders),
+      ]);
+      assert.equal(deadMe.status, 404);
+      assert.equal(deadSet.status, 404);
+      assert.equal(deadChange.status, 404);
+      assert.equal(deadDel.status, 404);
+
+      // Deleted user's Unud email can re-register via OTP and log in again
+      const reregOtp = await request("POST", "/api/auth/send-otp", {
+        email: "race@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(reregOtp.status, 200);
+      const rereg = await request("POST", "/api/auth/register", {
+        email: "race@student.unud.ac.id",
+        password: "ReRegistered1",
+        full_name: "Race User Reborn",
+        prodi: "TI",
+        angkatan: "2023",
+        otp: reregOtp.body.dev_otp,
+        otp_token: reregOtp.body.otp_token,
+      });
+      assert.equal(rereg.status, 201);
+
+      const relogin = await request("POST", "/api/auth/login", {
+        email: "race@student.unud.ac.id",
+        password: "ReRegistered1",
+      });
+      assert.equal(relogin.status, 200);
+      assert.equal(relogin.body.user.has_password, true);
     });
   });
 });
