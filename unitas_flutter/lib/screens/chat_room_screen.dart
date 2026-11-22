@@ -7,6 +7,7 @@ import '../core/api/auth_service.dart';
 import '../core/api/messages_service.dart';
 import '../core/crypto/e2ee_service.dart';
 import '../widgets/avatar.dart';
+import '../widgets/linkable_text.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String peerId;
@@ -684,13 +685,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
+                    LinkableText(
                       displayText,
                       style: body.copyWith(
                         color: isMe ? Colors.white : textPrimary,
                         fontSize: 14,
                         height: 1.35,
                       ),
+                      linkColor: isMe ? brandGold : const Color(0xFF0B57D0),
                     ),
                     const SizedBox(height: 4),
                     Row(

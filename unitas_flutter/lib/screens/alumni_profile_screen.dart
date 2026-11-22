@@ -1,8 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/users_service.dart';
+import '../widgets/linkable_text.dart';
 import 'chat_room_screen.dart';
 
 class AlumniProfileScreen extends StatefulWidget {
@@ -401,13 +402,15 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 10),
-                                Text(
-                                  bio.isNotEmpty ? bio : 'Alumni ini belum menambahkan bio.',
-                                  style: body.copyWith(
-                                    height: 1.55,
-                                    color: bio.isNotEmpty ? textPrimary : dim2,
-                                  ),
-                                ),
+                                bio.isNotEmpty
+                                    ? LinkableText(
+                                        bio,
+                                        style: body.copyWith(height: 1.55, color: textPrimary),
+                                      )
+                                    : Text(
+                                        'Alumni ini belum menambahkan bio.',
+                                        style: body.copyWith(height: 1.55, color: dim2),
+                                      ),
                               ],
                             ),
                           ),

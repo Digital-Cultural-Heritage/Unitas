@@ -9,6 +9,7 @@ import '../core/api/posts_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/unitas_logo.dart';
+import '../widgets/linkable_text.dart';
 import 'edit_profile_screen.dart';
 import 'login_screen.dart';
 import 'post_detail_screen.dart';
@@ -886,13 +887,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            Text(
-              bio.isNotEmpty ? bio : 'Ceritakan sedikit tentang pengalaman, minat, atau kegiatanmu saat ini.',
-              style: body.copyWith(
-                height: 1.55,
-                color: bio.isNotEmpty ? textPrimary : dim2,
-              ),
-            ),
+            bio.isNotEmpty
+                ? LinkableText(
+                    bio,
+                    style: body.copyWith(height: 1.55, color: textPrimary),
+                  )
+                : Text(
+                    'Ceritakan sedikit tentang pengalaman, minat, atau kegiatanmu saat ini.',
+                    style: body.copyWith(height: 1.55, color: dim2),
+                  ),
           ],
         ),
       ),

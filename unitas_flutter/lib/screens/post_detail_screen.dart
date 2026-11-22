@@ -1,9 +1,11 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/posts_service.dart';
 import '../core/api/users_service.dart';
 import '../widgets/avatar.dart';
+import '../widgets/linkable_text.dart';
 import 'alumni_profile_screen.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -518,7 +520,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                           style: caption,
                                         ),
                                       const SizedBox(height: 8),
-                                      Text(
+                                      LinkableText(
                                         _postContent,
                                         style: body.copyWith(color: textPrimary, height: 1.45),
                                       ),
@@ -872,17 +874,68 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final baseStyle = body.copyWith(fontSize: 13.5, color: textPrimary, height: 1.35);
     final match = RegExp(r'^(@\S+)(\s+.*)?$', dotAll: true).firstMatch(text);
     if (match == null) {
-      return Text(text, style: baseStyle);
+      return LinkableText(text, style: baseStyle);
     }
-    return Text.rich(
+    return _MentionLinkableText(
+      mention: match.group(1)!,
+      rest: match.group(2) ?? '',
+      baseStyle: baseStyle,
+    );
+  }
+}
+
+class _MentionLinkableText extends StatefulWidget {
+  final String mention;
+  final String rest;
+  final TextStyle baseStyle;
+
+  const _MentionLinkableText({
+    required this.mention,
+    required this.rest,
+    required this.baseStyle,
+  });
+
+  @override
+  State<_MentionLinkableText> createState() => _MentionLinkableTextState();
+}
+
+class _MentionLinkableTextState extends State<_MentionLinkableText> {
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  void _disposeRecognizers() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _disposeRecognizers();
+    return SelectableText.rich(
       TextSpan(
         children: [
           TextSpan(
-            text: match.group(1),
-            style: baseStyle.copyWith(color: brandNavy, fontWeight: FontWeight.w600),
+            text: widget.mention,
+            style: widget.baseStyle.copyWith(
+              color: brandNavy,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          if (match.group(2) != null)
-            TextSpan(text: match.group(2), style: baseStyle),
+          if (widget.rest.isNotEmpty)
+            ...LinkableText.buildSpans(
+              widget.rest,
+              baseStyle: widget.baseStyle,
+              linkColor: const Color(0xFF0B57D0),
+              onTapUrl: (url) => LinkableText.openUrl(context, url),
+              recognizers: _recognizers,
+            ),
         ],
       ),
     );

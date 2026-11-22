@@ -7,6 +7,7 @@ import '../core/api/users_service.dart';
 import '../core/api/api_client.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/linkable_text.dart';
 import 'chat_room_screen.dart';
 
 /// Menghasilkan daftar nomor halaman (maks 7 slot) dengan `null` sebagai elipsis (`…`).
@@ -446,7 +447,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
               const SizedBox(height: 14),
               Text('Tentang', style: label),
               const SizedBox(height: 6),
-              Text(bio, style: body.copyWith(height: 1.5)),
+              LinkableText(bio, style: body.copyWith(height: 1.5)),
             ],
             const SizedBox(height: 20),
             if (!isMe)

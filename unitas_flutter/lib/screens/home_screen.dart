@@ -13,6 +13,7 @@ import '../core/api/messages_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/unitas_logo.dart';
+import '../widgets/linkable_text.dart';
 import '../widgets/image_cropper_dialog.dart';
 import '../core/utils/image_validator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -1408,7 +1409,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (content.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                    child: Text(
+                    child: LinkableText(
                       content,
                       style: body.copyWith(height: 1.45, color: textPrimary, fontSize: 14.5),
                     ),
