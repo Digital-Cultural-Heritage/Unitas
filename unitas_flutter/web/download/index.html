@@ -5,9 +5,9 @@
   <meta http-equiv="X-UA-Compatible" content="IE=Edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#FDFBF7">
-  <meta name="description" content="Unduh atau buka Unitas — Jejaring Alumni Digital Universitas Udayana untuk Android dan iPhone/iPad.">
+  <meta name="description" content="Unduh atau buka Unitas - Jejaring Alumni Digital Universitas Udayana untuk Android dan iPhone/iPad.">
   <link rel="icon" type="image/png" href="../favicon.png">
-  <title>Dapatkan Unitas — Android &amp; iPhone</title>
+  <title>Dapatkan Unitas | Android &amp; iPhone</title>
 
   <!--
     ==========================================================================
@@ -165,6 +165,38 @@
       border-radius: 50%;
       background: var(--green);
       flex-shrink: 0;
+    }
+
+    /* Switcher OS khusus mobile */
+    .os-switcher {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      padding: 4px;
+      border-radius: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      margin-bottom: 14px;
+    }
+
+    .os-tab {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--dim);
+      font-family: inherit;
+      font-size: 13.5px;
+      font-weight: 700;
+      padding: 9px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .os-tab.is-active {
+      background: var(--navy);
+      color: #FFFFFF;
+      box-shadow: 0 4px 12px rgba(30, 58, 95, 0.22);
     }
 
     /* Callout WebView non-Safari di iOS */
@@ -428,6 +460,11 @@
       </div>
     </div>
 
+    <div id="osSwitcher" class="os-switcher" role="tablist" aria-label="Pilih platform perangkat">
+      <button id="tabAndroid" type="button" class="os-tab is-active" role="tab" aria-selected="true" aria-controls="cardAndroid">Android (.apk)</button>
+      <button id="tabIos" type="button" class="os-tab" role="tab" aria-selected="false" aria-controls="cardIos">iPhone &amp; iPad</button>
+    </div>
+
     <div id="iosWebviewAlert" class="webview-alert hidden" role="status">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="10"></circle>
@@ -553,15 +590,11 @@
             </div>
           </div>
         </div>
-
-        <div id="iosAlt" class="card-footer-link">
-          <button id="showAndroidBtn" type="button" class="link-subtle">Cari file Android (.apk)?</button>
-        </div>
       </article>
     </section>
 
     <footer class="site-footer">
-      Satu tautan pintar untuk seluruh alumni Universitas Udayana — Android &amp; Apple.
+      Satu tautan pintar untuk seluruh alumni Universitas Udayana (Android &amp; Apple).
     </footer>
   </main>
 
@@ -643,26 +676,41 @@
       var detectLabel = document.getElementById("detectLabel");
       var webviewAlert = document.getElementById("iosWebviewAlert");
       var androidAlt = document.getElementById("androidAlt");
-      var iosAlt = document.getElementById("iosAlt");
-      var showAndroidBtn = document.getElementById("showAndroidBtn");
+      var osSwitcher = document.getElementById("osSwitcher");
+      var tabAndroid = document.getElementById("tabAndroid");
+      var tabIos = document.getElementById("tabIos");
+
+      function setActiveTab(isIos) {
+        tabAndroid.classList.toggle("is-active", !isIos);
+        tabAndroid.setAttribute("aria-selected", String(!isIos));
+        tabIos.classList.toggle("is-active", isIos);
+        tabIos.setAttribute("aria-selected", String(isIos));
+      }
 
       function applyView(viewMode) {
         if (viewMode === "android") {
           wrap.classList.add("is-mobile");
           grid.classList.remove("two-col");
+          osSwitcher.classList.remove("hidden");
+          setActiveTab(false);
           cardAndroid.classList.remove("hidden");
           cardIos.classList.add("hidden");
           webviewAlert.classList.add("hidden");
           androidAlt.classList.remove("hidden");
-          detectLabel.textContent = "Perangkat Android terdeteksi";
+          detectLabel.textContent = mode === "android"
+            ? "Perangkat Android terdeteksi"
+            : "Tampilan Android (.apk)";
         } else if (viewMode === "ios" || viewMode === "ios-webview") {
           wrap.classList.add("is-mobile");
           grid.classList.remove("two-col");
+          osSwitcher.classList.remove("hidden");
+          setActiveTab(true);
           cardAndroid.classList.add("hidden");
           cardIos.classList.remove("hidden");
           androidAlt.classList.add("hidden");
-          iosAlt.classList.remove("hidden");
-          detectLabel.textContent = "Perangkat Apple (iPhone / iPad) terdeteksi";
+          detectLabel.textContent = (mode === "ios" || mode === "ios-webview")
+            ? "Perangkat Apple (iPhone / iPad) terdeteksi"
+            : "Tampilan iPhone & iPad (iOS)";
           if (viewMode === "ios-webview" && !testFlightUrl) {
             webviewAlert.classList.remove("hidden");
           } else {
@@ -671,17 +719,21 @@
         } else {
           wrap.classList.remove("is-mobile");
           grid.classList.add("two-col");
+          osSwitcher.classList.add("hidden");
           cardAndroid.classList.remove("hidden");
           cardIos.classList.remove("hidden");
           webviewAlert.classList.add("hidden");
           androidAlt.classList.remove("hidden");
-          iosAlt.classList.add("hidden");
           detectLabel.textContent = "Pilih perangkat untuk mencoba Unitas";
         }
       }
 
-      showAndroidBtn.addEventListener("click", function () {
-        applyView("desktop");
+      tabAndroid.addEventListener("click", function () {
+        applyView("android");
+      });
+
+      tabIos.addEventListener("click", function () {
+        applyView(mode === "ios-webview" ? "ios-webview" : "ios");
       });
 
       applyView(mode);

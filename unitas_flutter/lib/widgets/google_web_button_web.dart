@@ -65,16 +65,21 @@ class _GoogleWebButtonWrapperState extends State<_GoogleWebButtonWrapper> {
             final maxW = constraints.hasBoundedWidth && constraints.maxWidth > 0
                 ? constraints.maxWidth
                 : 320.0;
-            final width = maxW.clamp(200.0, 400.0).toDouble();
-            return Center(
-              child: web_only.renderButton(
-                configuration: web_only.GSIButtonConfiguration(
-                  theme: web_only.GSIButtonTheme.outline,
-                  size: web_only.GSIButtonSize.large,
-                  text: web_only.GSIButtonText.continueWith,
-                  shape: web_only.GSIButtonShape.rectangular,
-                  minimumWidth: width,
-                  locale: 'id',
+            // Google GSI membutuhkan lebar bilangan bulat dan menambahkan
+            // ~20px margin horizontal pada iframe tombolnya.
+            final width = (maxW - 24).floor().clamp(200, 376).toDouble();
+            return ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 46),
+              child: Center(
+                child: web_only.renderButton(
+                  configuration: web_only.GSIButtonConfiguration(
+                    theme: web_only.GSIButtonTheme.outline,
+                    size: web_only.GSIButtonSize.large,
+                    text: web_only.GSIButtonText.continueWith,
+                    shape: web_only.GSIButtonShape.rectangular,
+                    minimumWidth: width,
+                    locale: 'id',
+                  ),
                 ),
               ),
             );
