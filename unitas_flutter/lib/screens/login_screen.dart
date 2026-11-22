@@ -8,6 +8,7 @@ import '../core/api/api_client.dart';
 import '../core/api/auth_service.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
+import '../widgets/unitas_logo.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -167,23 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     // Logo / Brand
                     Row(
                       children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: brandNavy,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'U',
-                            style: GoogleFonts.outfit(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
+                        const UnitasLogo(size: 44),
                         const SizedBox(width: 12),
                         Text(
                           'Unitas',
