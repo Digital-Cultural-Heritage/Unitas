@@ -12,6 +12,7 @@ import 'package:unitas_flutter/screens/directory_screen.dart';
 import 'package:unitas_flutter/screens/login_screen.dart';
 import 'package:unitas_flutter/screens/profile_screen.dart';
 import 'package:unitas_flutter/widgets/avatar.dart';
+import 'package:unitas_flutter/widgets/linkable_text.dart';
 
 void main() {
   testWidgets('UnitasAvatar displays initials', (WidgetTester tester) async {
@@ -452,6 +453,44 @@ void main() {
       expect(nextLast.onPressed, isNull);
       await tester.tap(find.byIcon(Icons.chevron_left));
       expect(tapped, [4]);
+    });
+  });
+
+  group('LinkableText', () {
+    test('parseSegments detects http, https, and www URLs while trimming trailing punctuation', () {
+      final segments = LinkableText.parseSegments(
+        'Daftar di https://unud.ac.id/info, atau cek www.linkedin.com/in/alumni! (http://example.org/test).',
+      );
+
+      final links = segments.where((s) => s.isLink).toList();
+      expect(links.length, 3);
+      expect(links[0].text, 'https://unud.ac.id/info');
+      expect(links[0].url, 'https://unud.ac.id/info');
+      expect(links[1].text, 'www.linkedin.com/in/alumni');
+      expect(links[1].url, 'https://www.linkedin.com/in/alumni');
+      expect(links[2].text, 'http://example.org/test');
+      expect(links[2].url, 'http://example.org/test');
+    });
+
+    test('parseSegments ignores plain words with dots without scheme or www', () {
+      final segments = LinkableText.parseSegments(
+        'Email saya nama.alumni dan file laporan.pdf tidak jadi link.',
+      );
+      expect(segments.where((s) => s.isLink), isEmpty);
+    });
+
+    testWidgets('LinkableText renders full text cleanly', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: LinkableText('Info acara: https://unud.ac.id/acara'),
+          ),
+        ),
+      );
+      expect(
+        find.text('Info acara: https://unud.ac.id/acara', findRichText: true),
+        findsOneWidget,
+      );
     });
   });
 }

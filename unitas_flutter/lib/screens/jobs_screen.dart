@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/theme/colors.dart';
@@ -8,6 +8,7 @@ import '../core/api/jobs_service.dart';
 import '../core/utils/pdf_picker.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/linkable_text.dart';
 import 'chat_room_screen.dart';
 import 'create_job_screen.dart';
 import 'manage_job_screen.dart';
@@ -1064,10 +1065,15 @@ class _JobsScreenState extends State<JobsScreen> {
                 const SizedBox(height: 16),
                 Text('Deskripsi Pekerjaan', style: label),
                 const SizedBox(height: 6),
-                Text(
-                  desc.isNotEmpty ? desc : 'Tidak ada deskripsi tambahan.',
-                  style: body.copyWith(height: 1.55, color: desc.isEmpty ? dim2 : textPrimary),
-                ),
+                desc.isNotEmpty
+                    ? LinkableText(
+                        desc,
+                        style: body.copyWith(height: 1.55, color: textPrimary),
+                      )
+                    : Text(
+                        'Tidak ada deskripsi tambahan.',
+                        style: body.copyWith(height: 1.55, color: dim2),
+                      ),
                 if (applyUrl.isNotEmpty || contactEmail.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   Text('Jalur Eksternal Perusahaan', style: label),

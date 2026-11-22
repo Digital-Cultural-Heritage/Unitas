@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/events_service.dart';
@@ -6,6 +6,7 @@ import '../core/api/api_client.dart';
 import '../core/api/auth_service.dart';
 import '../core/api/users_service.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/linkable_text.dart';
 import 'create_event_screen.dart';
 import 'manage_event_screen.dart';
 
@@ -1414,7 +1415,7 @@ class _EventsScreenState extends State<EventsScreen> {
                   const SizedBox(height: 16),
                   Text('Deskripsi Acara', style: label),
                   const SizedBox(height: 6),
-                  Text(
+                  LinkableText(
                     desc,
                     style: body.copyWith(color: textPrimary, height: 1.5),
                   ),
