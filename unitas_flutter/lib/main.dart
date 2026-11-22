@@ -18,6 +18,7 @@ import 'screens/home_screen.dart';
 import 'screens/jobs_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
+import 'widgets/unitas_logo.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -213,23 +214,7 @@ class _SplashScreen extends StatelessWidget {
           child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: brandNavy,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                'U',
-                style: GoogleFonts.outfit(
-                  color: brandGold,
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
+            const UnitasLogo(size: 64),
             const SizedBox(height: 14),
             Text(
               'Unitas',

@@ -8,6 +8,7 @@ import '../core/api/auth_service.dart';
 import '../core/api/posts_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/unitas_logo.dart';
 import 'edit_profile_screen.dart';
 import 'login_screen.dart';
 import 'post_detail_screen.dart';
@@ -1337,13 +1338,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             Row(
               children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(color: brandNavy, borderRadius: BorderRadius.circular(10)),
-                  alignment: Alignment.center,
-                  child: Text('U', style: subTitle.copyWith(color: brandGold, fontSize: 18, fontWeight: FontWeight.w800)),
-                ),
+                const UnitasLogo(size: 40),
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

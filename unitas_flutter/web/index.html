@@ -53,17 +53,10 @@
       z-index: 9999;
       transition: opacity 0.25s ease;
     }
-    .splash-badge {
-      width: 60px;
-      height: 60px;
-      border-radius: 18px;
-      background-color: #1E3A5F;
-      color: #C9A84C;
-      font-size: 30px;
-      font-weight: 800;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .splash-logo {
+      width: 68px;
+      height: 68px;
+      object-fit: contain;
     }
     .splash-title {
       margin-top: 14px;
@@ -102,7 +95,7 @@
 </head>
 <body>
   <div id="splash-loader">
-    <div class="splash-badge">U</div>
+    <img class="splash-logo" src="icons/logo-splash.png" alt="Unitas" />
     <div class="splash-title">Unitas</div>
     <div class="splash-sub">Memuat aplikasi…</div>
     <div class="splash-bar"></div>

@@ -12,6 +12,7 @@ import '../core/api/notifications_service.dart';
 import '../core/api/messages_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/unitas_logo.dart';
 import '../widgets/image_cropper_dialog.dart';
 import '../core/utils/image_validator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -792,18 +793,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
       child: Row(
         children: [
-          Container(
-            width: 34, height: 34,
-            decoration: BoxDecoration(
-              color: brandNavy,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              'U',
-              style: subTitle.copyWith(color: brandGold, fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-          ),
+          const UnitasLogo(size: 36),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
