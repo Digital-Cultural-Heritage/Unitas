@@ -10,6 +10,8 @@ import '../widgets/avatar.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/unitas_logo.dart';
 import '../widgets/linkable_text.dart';
+import 'alumni_profile_screen.dart';
+import 'chat_room_screen.dart';
 import 'edit_profile_screen.dart';
 import 'login_screen.dart';
 import 'post_detail_screen.dart';
@@ -39,6 +41,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final Set<String> _responding = {};
   bool _loading = true;
   bool _loggingOut = false;
+  bool _hideCompletionBanner = false;
   String? _error;
   int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
   bool _notifPosts = true;
@@ -785,7 +788,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileCompletionBanner() {
-    if (_profile == null) return const SizedBox.shrink();
+    if (_profile == null || _hideCompletionBanner) return const SizedBox.shrink();
     final fields = <String, String>{
       'Foto': (_profile?['avatar_url'] ?? '').toString().trim(),
       'Bio': (_profile?['bio'] ?? '').toString().trim(),
@@ -800,46 +803,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final missing = fields.entries.where((e) => e.value.isEmpty).map((e) => e.key).take(3).join(', ');
 
     return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: InkWell(
-        onTap: _openEditProfile,
+      padding: const EdgeInsets.only(top: 12),
+      child: Material(
+        color: brandGold.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: brandGold.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: brandGold.withValues(alpha: 0.45)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.auto_awesome_outlined, size: 16, color: brandNavy),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Kelengkapan Profil ($pct%)',
-                      style: subTitle.copyWith(fontSize: 13),
+        child: InkWell(
+          onTap: _openEditProfile,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: brandGold.withValues(alpha: 0.35)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.auto_awesome_outlined, size: 15, color: brandNavy),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Kelengkapan Profil ($pct%)',
+                        style: subTitle.copyWith(fontSize: 12.5),
+                      ),
                     ),
-                  ),
-                  Text('Lengkapi →', style: label.copyWith(color: brandNavy)),
-                ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(99),
-                child: LinearProgressIndicator(
-                  value: filled / fields.length,
-                  minHeight: 5,
-                  color: brandNavy,
-                  backgroundColor: Colors.white70,
+                    Text('Lengkapi →', style: label.copyWith(color: brandNavy, fontSize: 11)),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () => setState(() => _hideCompletionBanner = true),
+                      borderRadius: BorderRadius.circular(99),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.close, size: 15, color: dim2),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 5),
-              Text('Belum diisi: $missing', style: caption.copyWith(fontSize: 11)),
-            ],
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(99),
+                  child: LinearProgressIndicator(
+                    value: filled / fields.length,
+                    minHeight: 4.5,
+                    color: brandNavy,
+                    backgroundColor: Colors.white70,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text('Belum diisi: $missing', style: caption.copyWith(fontSize: 11)),
+              ],
+            ),
           ),
         ),
       ),
@@ -968,37 +983,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
               final name = rawName.isEmpty ? '—' : rawName;
               final prodi = (p['prodi'] ?? '').toString().trim();
               final angkatan = (p['angkatan'] ?? '').toString().trim();
+              final eduLine = [
+                if (prodi.isNotEmpty) prodi,
+                if (angkatan.isNotEmpty) 'Angkatan $angkatan',
+              ].join(' · ');
+              final peerId = (p['user_id'] ??
+                      p['id'] ??
+                      (requester is Map ? (requester['user_id'] ?? requester['id']) : null))
+                  ?.toString() ??
+                  '';
+              final avatarUrl = p['avatar_url']?.toString().trim();
               final reqId = req['id']?.toString() ?? '';
               final busy = reqId.isEmpty || _responding.contains(reqId);
               return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
                   color: surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: borderColor),
                 ),
-                child: Row(children: [
-                  UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: subTitle),
-                        Text('$prodi · Angkatan $angkatan', style: caption),
-                      ],
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: peerId.isEmpty
+                        ? null
+                        : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => AlumniProfileScreen(
+                                  userId: peerId,
+                                  initialProfile: p,
+                                ),
+                              ),
+                            ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(children: [
+                        UnitasAvatar(
+                          initials: _initials(p),
+                          color: _colorFor(name),
+                          avatarUrl: avatarUrl,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name, style: subTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              if (eduLine.isNotEmpty)
+                                Text(eduLine, style: caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                          onPressed: busy ? null : () => _respond(reqId, 'accept'),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
+                          onPressed: busy ? null : () => _respond(reqId, 'reject'),
+                        ),
+                      ]),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
-                    onPressed: busy ? null : () => _respond(reqId, 'accept'),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
-                    onPressed: busy ? null : () => _respond(reqId, 'reject'),
-                  ),
-                ]),
+                ),
               );
             },
           ),
@@ -1039,9 +1089,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               final requester = conn['requester'];
               final addressee = conn['addressee'];
               final reqId = requester is Map ? (requester['user_id'] ?? requester['id'])?.toString() : null;
-              final rawProfile = reqId == myId
-                  ? (addressee is Map ? addressee['user_profiles'] : null)
-                  : (requester is Map ? requester['user_profiles'] : null);
+              final peerNode = reqId == myId ? addressee : requester;
+              final rawProfile = peerNode is Map ? peerNode['user_profiles'] : null;
               final p = _extractProfileMap(rawProfile);
               if (p == null) return const SizedBox.shrink();
               final rawName = (p['full_name'] ?? '').toString().trim();
@@ -1049,29 +1098,95 @@ class _ProfileScreenState extends State<ProfileScreen> {
               final job = (p['pekerjaan'] ?? '').toString().trim();
               final company = (p['perusahaan'] ?? '').toString().trim();
               final jobLine = [job, company].where((e) => e.isNotEmpty).join(' · ');
+              final prodi = (p['prodi'] ?? '').toString().trim();
+              final angkatan = (p['angkatan'] ?? '').toString().trim();
+              final eduLine = [
+                if (prodi.isNotEmpty) prodi,
+                if (angkatan.isNotEmpty) 'Angkatan $angkatan',
+              ].join(' · ');
+              final subtitleLine = jobLine.isNotEmpty ? jobLine : eduLine;
+              final peerId = (p['user_id'] ??
+                      p['id'] ??
+                      (peerNode is Map ? (peerNode['user_id'] ?? peerNode['id']) : null))
+                  ?.toString() ??
+                  '';
+              final avatarUrl = p['avatar_url']?.toString().trim();
 
               return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
                   color: surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: borderColor),
                 ),
-                child: Row(children: [
-                  UnitasAvatar(initials: _initials(p), color: _colorFor(name)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: subTitle),
-                        if (job.isNotEmpty)
-                          Text(jobLine, style: caption, overflow: TextOverflow.ellipsis),
-                      ],
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: peerId.isEmpty
+                        ? null
+                        : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => AlumniProfileScreen(
+                                  userId: peerId,
+                                  initialProfile: p,
+                                ),
+                              ),
+                            ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                      child: Row(children: [
+                        UnitasAvatar(
+                          initials: _initials(p),
+                          color: _colorFor(name),
+                          avatarUrl: avatarUrl,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: subTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (subtitleLine.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitleLine,
+                                  style: caption,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (peerId.isNotEmpty)
+                          IconButton(
+                            tooltip: 'Kirim Pesan',
+                            icon: const Icon(Icons.chat_bubble_outline, size: 19, color: brandNavy),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ChatRoomScreen(
+                                  peerId: peerId,
+                                  peerName: name,
+                                  peerInitials: _initials(p),
+                                  peerAvatarUrl: avatarUrl,
+                                  peerSubtitle: subtitleLine.isNotEmpty ? subtitleLine : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ]),
                     ),
                   ),
-                ]),
+                ),
               );
             },
           ),
