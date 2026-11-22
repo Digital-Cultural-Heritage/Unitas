@@ -21,3 +21,6 @@ desktop.ini
 **/*.jks
 **/*.keystore
 
+# ── Video promo (Remotion) ────────────────────────────────────────────────
+unitas_video/
+

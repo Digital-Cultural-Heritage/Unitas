@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#FDFBF7">
+  <meta name="description" content="Unduh atau buka Unitas — Jejaring Alumni Digital Universitas Udayana untuk Android dan iPhone/iPad.">
+  <link rel="icon" type="image/png" href="../favicon.png">
+  <title>Dapatkan Unitas — Android &amp; iPhone</title>
+
+  <!--
+    ==========================================================================
+    KONFIGURASI TAUTAN UNITAS (edit di sini kapan saja tanpa perlu ganti QR)
+    ==========================================================================
+  -->
+  <script>
+    window.UNITAS_LINKS = {
+      androidApkUrl: "https://github.com/Digital-Cultural-Heritage/Unitas/releases/latest/download/unitas-release.apk",
+      playStoreUrl: "",     // Opsional: isi link Google Play Store jika sudah rilis
+      iosTestFlightUrl: "", // Opsional: isi link TestFlight / App Store jika sudah tersedia
+      pwaUrl: "../",        // Relatif ke PWA Unitas pada deployment yang sama
+      appVersion: "v1.0.0"
+    };
+  </script>
+
+  <style>
+    :root {
+      --bg: #FDFBF7;
+      --surface: #F5F2EC;
+      --card: #FFFFFF;
+      --navy: #1E3A5F;
+      --navy-dark: #132640;
+      --gold: #C9A84C;
+      --gold-soft: rgba(201, 168, 76, 0.14);
+      --gold-border: rgba(201, 168, 76, 0.45);
+      --green: #5B9A6F;
+      --green-soft: rgba(91, 154, 111, 0.14);
+      --text: #1E3A5F;
+      --dim: rgba(30, 58, 95, 0.68);
+      --border: rgba(30, 58, 95, 0.12);
+      --shadow: 0 14px 36px rgba(19, 38, 64, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      min-height: 100%;
+    }
+
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: max(20px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      background-image:
+        radial-gradient(circle at 90% 0%, rgba(201, 168, 76, 0.12), transparent 36%),
+        radial-gradient(circle at 0% 100%, rgba(30, 58, 95, 0.07), transparent 40%);
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 840px;
+      margin: 8px auto 0;
+    }
+
+    .wrap.is-mobile {
+      max-width: 480px;
+    }
+
+    /* Header merek */
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      margin-bottom: 18px;
+    }
+
+    .brand-logo-box {
+      width: 72px;
+      height: 72px;
+      border-radius: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      box-shadow: 0 10px 24px rgba(19, 38, 64, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+
+    .brand-logo {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .brand-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--navy-dark);
+    }
+
+    .ver-pill {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--navy);
+      background: var(--gold-soft);
+      border: 1px solid var(--gold-border);
+      border-radius: 999px;
+      padding: 2px 8px;
+      letter-spacing: 0.02em;
+    }
+
+    .brand p {
+      margin: 4px 0 0;
+      font-size: 14px;
+      color: var(--dim);
+    }
+
+    .detect-row {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .detect-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--navy);
+    }
+
+    .detect-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+    }
+
+    /* Callout WebView non-Safari di iOS */
+    .webview-alert {
+      background: var(--gold-soft);
+      border: 1px solid var(--gold-border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 13px;
+      color: var(--navy-dark);
+    }
+
+    .webview-alert svg {
+      flex-shrink: 0;
+      margin-top: 2px;
+      color: var(--navy);
+    }
+
+    .webview-alert strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    /* Layout grid desktop vs mobile */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .cards-grid.two-col {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: stretch;
+    }
+
+    @media (max-width: 720px) {
+      .cards-grid.two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .os-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--navy);
+      color: var(--gold);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .os-icon.apple {
+      background: var(--navy-dark);
+      color: #FDFBF7;
+    }
+
+    .card-head h2 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--navy-dark);
+    }
+
+    .card-head span {
+      display: block;
+      font-size: 12.5px;
+      color: var(--dim);
+    }
+
+    .card-desc {
+      margin: 0 0 16px;
+      font-size: 13.5px;
+      color: var(--dim);
+    }
+
+    /* Tombol CTA utama */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      width: 100%;
+      padding: 13px 16px;
+      border-radius: 13px;
+      border: 0;
+      text-decoration: none;
+      font-size: 14.5px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.12s ease, background-color 0.15s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.985);
+    }
+
+    .btn-primary {
+      background: var(--navy);
+      color: #FFFFFF;
+      box-shadow: 0 8px 20px rgba(30, 58, 95, 0.22);
+    }
+
+    .btn-primary:hover {
+      background: var(--navy-dark);
+    }
+
+    .btn-gold {
+      background: var(--navy-dark);
+      color: var(--gold);
+      box-shadow: 0 8px 20px rgba(19, 38, 64, 0.2);
+    }
+
+    .btn-gold:hover {
+      background: #0d1c30;
+    }
+
+    /* Kotak langkah install */
+    .steps-box {
+      margin-top: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+    }
+
+    .steps-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--navy);
+      margin: 0 0 10px;
+    }
+
+    .step {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .step + .step {
+      margin-top: 10px;
+    }
+
+    .step-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--navy);
+      color: #FFFFFF;
+      font-size: 11.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-text {
+      flex: 1;
+      color: var(--dim);
+    }
+
+    .step-text strong {
+      color: var(--navy-dark);
+    }
+
+    .inline-ico {
+      display: inline-flex;
+      align-items: center;
+      vertical-align: -3px;
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--navy);
+      margin: 0 2px;
+    }
+
+    .card-footer-link {
+      margin-top: auto;
+      padding-top: 14px;
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .link-subtle {
+      color: var(--navy);
+      font-weight: 600;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(30, 58, 95, 0.35);
+      padding-bottom: 1px;
+      background: none;
+      border-top: 0;
+      border-left: 0;
+      border-right: 0;
+      font-family: inherit;
+      font-size: inherit;
+      cursor: pointer;
+    }
+
+    .link-subtle:hover {
+      border-bottom-style: solid;
+    }
+
+    .site-footer {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--dim);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <main id="wrap" class="wrap is-mobile">
+    <header class="brand">
+      <div class="brand-logo-box">
+        <img class="brand-logo" src="../icons/logo-splash.png" alt="Logo Unitas">
+      </div>
+      <div class="brand-title-row">
+        <h1>Unitas</h1>
+        <span id="versionBadge" class="ver-pill">v1.0.0</span>
+      </div>
+      <p>Jejaring Alumni Digital Universitas Udayana</p>
+    </header>
+
+    <div class="detect-row">
+      <div class="detect-badge">
+        <span class="detect-dot" aria-hidden="true"></span>
+        <span id="detectLabel">Menyiapkan tautan perangkat…</span>
+      </div>
+    </div>
+
+    <div id="iosWebviewAlert" class="webview-alert hidden" role="status">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <div>
+        <strong>Buka lewat Safari terlebih dahulu</strong>
+        Jika Anda memindai QR dari kamera/WhatsApp/Instagram/Chrome, ketuk ikon browser lalu pilih <b>Buka di Safari</b> agar fitur <i>Add to Home Screen</i> dan Login Google berfungsi normal.
+      </div>
+    </div>
+
+    <section id="cardsGrid" class="cards-grid">
+      <!-- Kartu Android -->
+      <article id="cardAndroid" class="card">
+        <div class="card-head">
+          <div class="os-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="3" width="12" height="18" rx="2.5"></rect>
+              <line x1="10" y1="17.5" x2="14" y2="17.5"></line>
+            </svg>
+          </div>
+          <div>
+            <h2>Android</h2>
+            <span id="androidSub">Installer aplikasi Android (.apk)</span>
+          </div>
+        </div>
+
+        <p id="androidDesc" class="card-desc">
+          Pasang aplikasi native Unitas langsung di HP Android untuk pengalaman paling ringan dan notifikasi penuh.
+        </p>
+
+        <a id="androidCta" class="btn btn-primary" href="#" rel="noopener noreferrer">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span id="androidCtaText">Unduh Unitas untuk Android (.apk)</span>
+        </a>
+
+        <div id="androidSteps" class="steps-box">
+          <p class="steps-title">Cara pasang di Android</p>
+          <div class="step">
+            <span class="step-num">1</span>
+            <div class="step-text">Ketuk tombol unduh di atas dan tunggu file <strong>.apk</strong> selesai tersimpan.</div>
+          </div>
+          <div class="step">
+            <span class="step-num">2</span>
+            <div class="step-text">Buka file tersebut; jika diminta, izinkan <strong>Install dari sumber ini</strong> di pengaturan browser.</div>
+          </div>
+          <div class="step">
+            <span class="step-num">3</span>
+            <div class="step-text">Buka aplikasi <strong>Unitas</strong> dan masuk menggunakan email kampus <strong>@unud.ac.id</strong>.</div>
+          </div>
+        </div>
+
+        <div id="androidAlt" class="card-footer-link">
+          <a id="androidAltWeb" class="link-subtle" href="../">Atau coba langsung di browser (Web App)</a>
+        </div>
+      </article>
+
+      <!-- Kartu Apple iPhone / iPad -->
+      <article id="cardIos" class="card">
+        <div class="card-head">
+          <div class="os-icon apple" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="2.5" width="12" height="19" rx="3"></rect>
+              <line x1="10" y1="5.5" x2="14" y2="5.5"></line>
+            </svg>
+          </div>
+          <div>
+            <h2>iPhone &amp; iPad (iOS)</h2>
+            <span id="iosSub">Web App / PWA via Safari (tanpa App Store)</span>
+          </div>
+        </div>
+
+        <p id="iosDesc" class="card-desc">
+          Apple tidak mendukung pemasangan file <code>.apk</code>. Pengguna iPhone/iPad bisa langsung menjalankan Unitas di Safari dan menambahkannya ke Layar Utama.
+        </p>
+
+        <a id="iosCta" class="btn btn-gold" href="../">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          <span id="iosCtaText">Buka Unitas di iPhone / iPad</span>
+        </a>
+
+        <div id="iosSteps" class="steps-box">
+          <p class="steps-title">Jadikan seperti aplikasi di iPhone</p>
+          <div class="step">
+            <span class="step-num">1</span>
+            <div class="step-text">Ketuk <strong>Buka Unitas di iPhone / iPad</strong> di atas lewat browser <strong>Safari</strong>.</div>
+          </div>
+          <div class="step">
+            <span class="step-num">2</span>
+            <div class="step-text">
+              Ketuk ikon <strong>Share</strong>
+              <span class="inline-ico" title="Ikon Share Safari">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                  <polyline points="16 6 12 2 8 6"></polyline>
+                  <line x1="12" y1="2" x2="12" y2="15"></line>
+                </svg>
+              </span>
+              di bar bagian bawah Safari.
+            </div>
+          </div>
+          <div class="step">
+            <span class="step-num">3</span>
+            <div class="step-text">
+              Pilih <strong>Add to Home Screen</strong>
+              <span class="inline-ico" title="Add to Home Screen">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="4"></rect>
+                  <line x1="12" y1="8" x2="12" y2="16"></line>
+                  <line x1="8" y1="12" x2="16" y2="12"></line>
+                </svg>
+              </span>
+              (<i>Tambah ke Layar Utama</i>) lalu ketuk <strong>Add</strong>.
+            </div>
+          </div>
+        </div>
+
+        <div id="iosAlt" class="card-footer-link">
+          <button id="showAndroidBtn" type="button" class="link-subtle">Cari file Android (.apk)?</button>
+        </div>
+      </article>
+    </section>
+
+    <footer class="site-footer">
+      Satu tautan pintar untuk seluruh alumni Universitas Udayana — Android &amp; Apple.
+    </footer>
+  </main>
+
+  <script>
+    (function () {
+      var cfg = window.UNITAS_LINKS || {};
+      var pwaUrl = (cfg.pwaUrl || "../").trim() || "../";
+      var playUrl = (cfg.playStoreUrl || "").trim();
+      var apkUrl = (cfg.androidApkUrl || "").trim();
+      var testFlightUrl = (cfg.iosTestFlightUrl || "").trim();
+      var version = (cfg.appVersion || "").trim();
+
+      var params = new URLSearchParams(window.location.search);
+      var forced = (params.get("platform") || "").toLowerCase();
+      var allowedForced = { "android": true, "ios": true, "ios-webview": true, "desktop": true };
+      var ua = navigator.userAgent || "";
+
+      var mode;
+      if (allowedForced[forced]) {
+        mode = forced;
+      } else if (/Android/i.test(ua)) {
+        mode = "android";
+      } else if (/iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) {
+        var isNonSafariIos = /CriOS|FxiOS|EdgiOS|OPiOS|FBAN|FBAV|Instagram|Line\/|WhatsApp|TikTok|BytedanceWebview|GSA\//i.test(ua);
+        mode = isNonSafariIos ? "ios-webview" : "ios";
+      } else {
+        mode = "desktop";
+      }
+
+      var versionBadge = document.getElementById("versionBadge");
+      if (versionBadge) {
+        if (version) {
+          versionBadge.textContent = version;
+        } else {
+          versionBadge.classList.add("hidden");
+        }
+      }
+
+      var androidCta = document.getElementById("androidCta");
+      var androidCtaText = document.getElementById("androidCtaText");
+      var androidSub = document.getElementById("androidSub");
+      var androidSteps = document.getElementById("androidSteps");
+      var androidAltWeb = document.getElementById("androidAltWeb");
+
+      if (playUrl) {
+        androidCta.href = playUrl;
+        androidCtaText.textContent = "Unduh di Google Play Store";
+        androidSub.textContent = "Aplikasi resmi Android";
+        androidSteps.classList.add("hidden");
+      } else {
+        androidCta.href = apkUrl || "#";
+        androidCtaText.textContent = "Unduh Unitas untuk Android (.apk)";
+        androidSub.textContent = "Installer aplikasi Android (.apk)";
+      }
+      androidAltWeb.href = pwaUrl;
+
+      var iosCta = document.getElementById("iosCta");
+      var iosCtaText = document.getElementById("iosCtaText");
+      var iosSub = document.getElementById("iosSub");
+      var iosDesc = document.getElementById("iosDesc");
+      var iosSteps = document.getElementById("iosSteps");
+
+      if (testFlightUrl) {
+        iosCta.href = testFlightUrl;
+        iosCta.setAttribute("rel", "noopener noreferrer");
+        iosCtaText.textContent = "Instal Unitas via TestFlight / App Store";
+        iosSub.textContent = "Versi native iOS via Apple";
+        iosDesc.textContent = "Buka tautan di bawah untuk menginstal versi iOS langsung melalui TestFlight / App Store.";
+        iosSteps.classList.add("hidden");
+      } else {
+        iosCta.href = pwaUrl;
+        iosCtaText.textContent = "Buka Unitas di iPhone / iPad";
+      }
+
+      var wrap = document.getElementById("wrap");
+      var grid = document.getElementById("cardsGrid");
+      var cardAndroid = document.getElementById("cardAndroid");
+      var cardIos = document.getElementById("cardIos");
+      var detectLabel = document.getElementById("detectLabel");
+      var webviewAlert = document.getElementById("iosWebviewAlert");
+      var androidAlt = document.getElementById("androidAlt");
+      var iosAlt = document.getElementById("iosAlt");
+      var showAndroidBtn = document.getElementById("showAndroidBtn");
+
+      function applyView(viewMode) {
+        if (viewMode === "android") {
+          wrap.classList.add("is-mobile");
+          grid.classList.remove("two-col");
+          cardAndroid.classList.remove("hidden");
+          cardIos.classList.add("hidden");
+          webviewAlert.classList.add("hidden");
+          androidAlt.classList.remove("hidden");
+          detectLabel.textContent = "Perangkat Android terdeteksi";
+        } else if (viewMode === "ios" || viewMode === "ios-webview") {
+          wrap.classList.add("is-mobile");
+          grid.classList.remove("two-col");
+          cardAndroid.classList.add("hidden");
+          cardIos.classList.remove("hidden");
+          androidAlt.classList.add("hidden");
+          iosAlt.classList.remove("hidden");
+          detectLabel.textContent = "Perangkat Apple (iPhone / iPad) terdeteksi";
+          if (viewMode === "ios-webview" && !testFlightUrl) {
+            webviewAlert.classList.remove("hidden");
+          } else {
+            webviewAlert.classList.add("hidden");
+          }
+        } else {
+          wrap.classList.remove("is-mobile");
+          grid.classList.add("two-col");
+          cardAndroid.classList.remove("hidden");
+          cardIos.classList.remove("hidden");
+          webviewAlert.classList.add("hidden");
+          androidAlt.classList.remove("hidden");
+          iosAlt.classList.add("hidden");
+          detectLabel.textContent = "Pilih perangkat untuk mencoba Unitas";
+        }
+      }
+
+      showAndroidBtn.addEventListener("click", function () {
+        applyView("desktop");
+      });
+
+      applyView(mode);
+    })();
+  </script>
+</body>
+</html>

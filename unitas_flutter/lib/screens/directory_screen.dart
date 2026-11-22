@@ -128,12 +128,15 @@ class DirectoryPaginationBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: active ? brandNavy : borderColor),
           ),
-          alignment: Alignment.center,
-          child: Text(
-            '$page',
-            style: caption.copyWith(
-              color: active ? Colors.white : dim1,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+          child: Center(
+            widthFactor: 1,
+            heightFactor: 1,
+            child: Text(
+              '$page',
+              style: caption.copyWith(
+                color: active ? Colors.white : dim1,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              ),
             ),
           ),
         ),

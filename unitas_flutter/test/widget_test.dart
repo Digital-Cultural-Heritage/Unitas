@@ -424,9 +424,13 @@ void main() {
         );
       }
 
-      // Page 2 of 5 -> shows 16-30, taps 4, prev (1), next (3)
+      // Page 2 of 5 -> shows 16-30, horizontal pills, taps 4, prev (1), next (3)
       await pumpBar(2, 15);
       expect(find.text('Menampilkan 16–30 dari 72 alumni'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('1')).dy,
+        tester.getTopLeft(find.text('2')).dy,
+      );
 
       await tester.tap(find.text('4'));
       await tester.tap(find.byIcon(Icons.chevron_left));
