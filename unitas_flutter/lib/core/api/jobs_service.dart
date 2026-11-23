@@ -16,6 +16,20 @@ class JobsService {
     return asJsonMapList(res);
   }
 
+  static Future<Map<String, dynamic>?> getJobById(String jobId) async {
+    if (jobId.isEmpty) return null;
+    try {
+      final res = asJsonMap(await ApiClient.get('/api/jobs/$jobId', auth: false));
+      final data = res['data'];
+      if (data is Map) return Map<String, dynamic>.from(data);
+      if (res['id'] != null) return res;
+      return null;
+    } on ApiException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 400) return null;
+      rethrow;
+    }
+  }
+
   // ── Get saved jobs ─────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getSavedJobs() async {
     final res = await ApiClient.get('/api/jobs/saved');

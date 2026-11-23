@@ -798,7 +798,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildHeader() {
     final rawName = (_me?['full_name'] ?? '').toString().trim();
     final name = rawName.isEmpty ? 'Alumni' : rawName;
-    final initials = _meInitials();
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
       child: Row(
@@ -887,20 +886,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
               ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Tooltip(
-            message: 'Profil Saya',
-            child: InkWell(
-              onTap: widget.onOpenProfile,
-              borderRadius: BorderRadius.circular(99),
-              child: UnitasAvatar(
-                initials: initials,
-                color: _colorFor(_me?['id'] ?? 'me'),
-                size: 36,
-                avatarUrl: _avatarWithVersion(_me?['avatar_url']),
-              ),
             ),
           ),
         ],

@@ -166,6 +166,26 @@ router.get("/leaderboard", async (req, res, next) => {
   }
 });
 
+// -- GET /api/posts/:id - Single post detail -------------------------------
+router.get("/:id", async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("posts")
+      .select(`
+        id, content, image_url, likes_count, comments_count, created_at,
+        user:user_id(id, user_profiles(full_name, initials, avatar_url, prodi, angkatan))
+      `)
+      .eq("id", req.params.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Post tidak ditemukan" });
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // -- POST /api/posts - Buat post -------------------------------------------
 router.post(
   "/",

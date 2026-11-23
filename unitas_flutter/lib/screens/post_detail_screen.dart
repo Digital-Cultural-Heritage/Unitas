@@ -11,7 +11,13 @@ import 'alumni_profile_screen.dart';
 class PostDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
   final VoidCallback onPostDeleted;
-  const PostDetailScreen({super.key, required this.post, required this.onPostDeleted});
+  final bool scrollToComments;
+  const PostDetailScreen({
+    super.key,
+    required this.post,
+    required this.onPostDeleted,
+    this.scrollToComments = false,
+  });
 
   @override
   State<PostDetailScreen> createState() => _PostDetailScreenState();
@@ -26,6 +32,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final Set<String> _deletingCommentIds = {};
   final _commentCtrl = TextEditingController();
   final _commentFocus = FocusNode();
+  final _commentsKey = GlobalKey();
+  bool _didAutoScroll = false;
   Map<String, dynamic>? _me;
 
   late int _likesCount;
@@ -106,6 +114,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           _error = null;
           _loading = false;
         });
+        if (widget.scrollToComments && !_didAutoScroll) {
+          _didAutoScroll = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final ctx = _commentsKey.currentContext;
+            if (ctx != null && mounted) {
+              Scrollable.ensureVisible(
+                ctx,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+                alignment: 0.05,
+              );
+            }
+          });
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -600,6 +622,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ),
                             Text(
                               'Komentar (${_comments.length})',
+                              key: _commentsKey,
                               style: label,
                             ),
                             const SizedBox(height: 14),

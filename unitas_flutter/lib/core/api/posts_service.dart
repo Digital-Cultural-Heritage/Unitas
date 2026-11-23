@@ -11,6 +11,29 @@ class PostsService {
     return asJsonMapList(res);
   }
 
+  static Future<Map<String, dynamic>?> getPostById(String postId) async {
+    if (postId.isEmpty) return null;
+    try {
+      final res = asJsonMap(await ApiClient.get('/api/posts/$postId'));
+      final data = res['data'];
+      if (data is Map) return Map<String, dynamic>.from(data);
+      if (res['id'] != null) return res;
+      return null;
+    } on ApiException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 400) {
+        // Fallback jika backend remote belum memiliki endpoint GET /api/posts/:id
+        try {
+          final feed = await getFeed(page: 1);
+          for (final p in feed) {
+            if (p['id']?.toString() == postId) return p;
+          }
+        } catch (_) {}
+        return null;
+      }
+      rethrow;
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getUserPosts(
     String userId, {
     int page = 1,

@@ -2,7 +2,14 @@ import 'package:flutter/material.dart';
 import '../core/theme/colors.dart';
 import '../core/theme/text_styles.dart';
 import '../core/api/notifications_service.dart';
+import '../core/api/posts_service.dart';
+import '../core/api/jobs_service.dart';
 import '../widgets/avatar.dart';
+import 'alumni_profile_screen.dart';
+import 'events_screen.dart';
+import 'jobs_screen.dart';
+import 'manage_job_screen.dart';
+import 'post_detail_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -17,6 +24,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool _markingAll = false;
   String? _error;
   final Set<String> _markingIds = {};
+  String? _navigatingId;
 
   @override
   void initState() {
@@ -107,6 +115,218 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } finally {
       _markingIds.remove(nid);
     }
+  }
+
+  void _showUnavailable(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _openNotificationTarget(int index) async {
+    if (index < 0 || index >= _items.length) return;
+    final n = _items[index];
+    final nid = n['id']?.toString() ?? '';
+    if (_navigatingId != null) return;
+
+    _markOneRead(index);
+
+    final type = (n['type'] ?? '').toString();
+    final refId = (n['reference_id'] ?? '').toString().trim();
+    final actorRaw = n['actor'];
+    final actor = actorRaw is Map ? Map<String, dynamic>.from(actorRaw) : null;
+    final actorId = (n['actor_id'] ?? actor?['id'] ?? '').toString().trim();
+
+    if (type == 'like' || type == 'comment') {
+      if (refId.isEmpty) {
+        _showUnavailable('Postingan sudah tidak tersedia');
+        return;
+      }
+      setState(() => _navigatingId = nid);
+      try {
+        final post = await PostsService.getPostById(refId);
+        if (!mounted) return;
+        if (post == null) {
+          _showUnavailable('Postingan sudah tidak tersedia');
+          return;
+        }
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostDetailScreen(
+              post: post,
+              onPostDeleted: () {},
+              scrollToComments: type == 'comment',
+            ),
+          ),
+        );
+      } catch (_) {
+        _showUnavailable('Gagal membuka postingan');
+      } finally {
+        if (mounted) setState(() => _navigatingId = null);
+      }
+      return;
+    }
+
+    if (type == 'connection_request' || type == 'connection_accepted') {
+      if (actorId.isEmpty) {
+        _showUnavailable('Profil alumni tidak ditemukan');
+        return;
+      }
+      final profiles = actor?['user_profiles'];
+      final profile = profiles is List && profiles.isNotEmpty
+          ? (profiles.first is Map ? Map<String, dynamic>.from(profiles.first as Map) : null)
+          : (profiles is Map ? Map<String, dynamic>.from(profiles) : null);
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AlumniProfileScreen(
+            userId: actorId,
+            initialProfile: profile != null ? {...profile, 'id': actorId} : null,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (type == 'job_application') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ManageJobScreen()),
+      );
+      return;
+    }
+
+    if (type == 'job_status') {
+      if (refId.isEmpty) {
+        _showUnavailable('Lowongan sudah tidak tersedia');
+        return;
+      }
+      setState(() => _navigatingId = nid);
+      try {
+        final job = await JobsService.getJobById(refId);
+        if (!mounted) return;
+        if (job == null) {
+          _showUnavailable('Lowongan sudah tidak tersedia');
+          return;
+        }
+        _showJobDetailSheet(job);
+      } catch (_) {
+        _showUnavailable('Gagal memuat detail lowongan');
+      } finally {
+        if (mounted) setState(() => _navigatingId = null);
+      }
+      return;
+    }
+
+    if (type == 'event_reminder') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const EventsScreen()),
+      );
+    }
+  }
+
+  void _showJobDetailSheet(Map<String, dynamic> job) {
+    final title = (job['title'] ?? 'Detail Lowongan').toString();
+    final company = (job['company'] ?? '').toString();
+    final location = (job['location'] ?? '').toString();
+    final jobType = (job['job_type'] ?? '').toString();
+    final salary = (job['salary'] ?? '').toString();
+    final desc = (job['description'] ?? '').toString().trim();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: brandBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 14, 20, 24 + MediaQuery.paddingOf(ctx).bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: borderColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(title, style: heading.copyWith(fontSize: 18)),
+            if (company.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(company, style: subTitle.copyWith(color: brandNavy)),
+            ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (location.isNotEmpty) _jobChip(Icons.location_on_outlined, location),
+                if (jobType.isNotEmpty) _jobChip(Icons.work_outline, jobType),
+                if (salary.isNotEmpty) _jobChip(Icons.payments_outlined, salary),
+              ],
+            ),
+            if (desc.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: SingleChildScrollView(
+                  child: Text(desc, style: body.copyWith(height: 1.5)),
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: brandNavy,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const JobsScreen()),
+                  );
+                },
+                child: const Text('Lihat di Karier', style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _jobChip(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: dim2),
+          const SizedBox(width: 5),
+          Text(text, style: caption),
+        ],
+      ),
+    );
   }
 
   IconData _iconForType(String type) {
@@ -273,7 +493,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           .toUpperCase();
 
                       return InkWell(
-                        onTap: () => _markOneRead(i),
+                        onTap: () => _openNotificationTarget(i),
                         borderRadius: BorderRadius.circular(14),
                         child: Container(
                           padding: const EdgeInsets.all(14),
@@ -343,7 +563,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                   ],
                                 ),
                               ),
-                              if (!isRead)
+                              if (_navigatingId != null && _navigatingId == n['id']?.toString())
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 6, left: 8),
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                )
+                              else if (!isRead)
                                 Container(
                                   width: 8,
                                   height: 8,
