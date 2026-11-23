@@ -18,7 +18,7 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#FDFBF7">
   <meta name="description" content="Unitas - Jejaring Alumni Digital Universitas Udayana">
 
@@ -42,8 +42,22 @@
       padding: 0;
       width: 100%;
       height: 100%;
+      height: 100dvh;
       overflow: hidden;
+      touch-action: pan-x pan-y;
+      -webkit-text-size-adjust: 100%;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    input,
+    textarea,
+    select,
+    [contenteditable="true"],
+    .flt-text-editing,
+    flt-text-editing-host input,
+    flt-text-editing-host textarea,
+    flt-semantics input,
+    flt-semantics textarea {
+      font-size: 16px !important;
     }
     #splash-loader {
       position: fixed;
@@ -104,13 +118,116 @@
     <div class="splash-bar"></div>
   </div>
   <script>
-    window.addEventListener('flutter-first-frame', function () {
-      var el = document.getElementById('splash-loader');
-      if (el) {
-        el.style.opacity = '0';
-        setTimeout(function () { el.remove(); }, 250);
+    (function () {
+      var NO_ZOOM_CSS =
+        'input, textarea, select, [contenteditable="true"], .flt-text-editing, ' +
+        'flt-text-editing-host input, flt-text-editing-host textarea, ' +
+        'flt-semantics input, flt-semantics textarea { font-size: 16px !important; }';
+
+      function injectNoZoomIntoShadow(el) {
+        if (!el || !el.shadowRoot) return;
+        if (el.shadowRoot.getElementById('unitas-ios-no-zoom')) return;
+        var style = document.createElement('style');
+        style.id = 'unitas-ios-no-zoom';
+        style.textContent = NO_ZOOM_CSS;
+        el.shadowRoot.appendChild(style);
       }
-    });
+
+      function scanFlutterHosts() {
+        var hosts = document.querySelectorAll('flt-glass-pane, flutter-view');
+        for (var i = 0; i < hosts.length; i++) {
+          injectNoZoomIntoShadow(hosts[i]);
+        }
+      }
+
+      window.addEventListener('flutter-first-frame', function () {
+        var el = document.getElementById('splash-loader');
+        if (el) {
+          el.style.opacity = '0';
+          setTimeout(function () { el.remove(); }, 250);
+        }
+        scanFlutterHosts();
+      });
+
+      if (document.body && typeof MutationObserver !== 'undefined') {
+        var observer = new MutationObserver(function () {
+          scanFlutterHosts();
+        });
+        observer.observe(document.body, { childList: true });
+      }
+      scanFlutterHosts();
+
+      function blockGesture(e) {
+        e.preventDefault();
+      }
+      document.addEventListener('gesturestart', blockGesture, { passive: false });
+      document.addEventListener('gesturechange', blockGesture, { passive: false });
+      document.addEventListener('gestureend', blockGesture, { passive: false });
+
+      function isEditableTag(el) {
+        if (!el) return false;
+        var tag = el.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!el.isContentEditable;
+      }
+
+      function isEditableFocused() {
+        if (isEditableTag(document.activeElement)) return true;
+        var hosts = document.querySelectorAll('flt-glass-pane, flutter-view');
+        for (var i = 0; i < hosts.length; i++) {
+          var sr = hosts[i].shadowRoot;
+          if (sr && isEditableTag(sr.activeElement)) return true;
+        }
+        return false;
+      }
+
+      var lastResetAt = 0;
+      var resetTimer = null;
+
+      function resetViewportIfNeeded() {
+        if (isEditableFocused()) return;
+        var now = Date.now();
+        if (now - lastResetAt < 400) return;
+
+        var scrolled = window.scrollX !== 0 || window.scrollY !== 0;
+        var vv = window.visualViewport;
+        var zoomed = !!(vv && vv.scale > 1.01);
+        if (!scrolled && !zoomed) return;
+
+        lastResetAt = now;
+        if (zoomed) {
+          var meta = document.querySelector('meta[name="viewport"]');
+          if (meta) {
+            var baseContent =
+              'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover';
+            meta.setAttribute(
+              'content',
+              'width=device-width, initial-scale=1.0, maximum-scale=1.0001, minimum-scale=1.0, user-scalable=no, viewport-fit=cover'
+            );
+            requestAnimationFrame(function () {
+              meta.setAttribute('content', baseContent);
+              window.scrollTo(0, 0);
+            });
+            return;
+          }
+        }
+        window.scrollTo(0, 0);
+      }
+
+      function scheduleViewportReset() {
+        if (resetTimer) clearTimeout(resetTimer);
+        resetTimer = setTimeout(resetViewportIfNeeded, 150);
+      }
+
+      window.addEventListener('focusout', scheduleViewportReset, true);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', scheduleViewportReset);
+      }
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+          scheduleViewportReset();
+        }
+      });
+    })();
   </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.

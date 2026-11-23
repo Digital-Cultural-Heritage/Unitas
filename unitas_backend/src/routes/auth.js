@@ -8,7 +8,7 @@ const { body, validationResult } = require("express-validator");
 const supabase = require("../lib/supabase");
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require("../lib/jwt");
 const { requireAuth } = require("../middleware/auth");
-const { sendOtpEmail } = require("../lib/mailer");
+const { sendOtpEmail, isEmailDeliveryConfigured } = require("../lib/mailer");
 
 const router = express.Router();
 
@@ -150,7 +150,8 @@ function validate(req, res) {
 // Normalisasi sama persis dengan express-validator normalizeEmail() (default),
 // supaya email dari Google cocok dengan email yang didaftarkan manual.
 function normalizeEmail(email) {
-  return validator.normalizeEmail(String(email)) || String(email).toLowerCase();
+  const trimmed = String(email || "").trim();
+  return validator.normalizeEmail(trimmed) || trimmed.toLowerCase();
 }
 
 // PostgREST mengembalikan relasi one-to-one sebagai object, one-to-many sebagai array
@@ -162,6 +163,19 @@ function firstProfile(rel) {
 function hasPassword(hash) {
   return typeof hash === "string" && hash.startsWith("$2");
 }
+
+function isProfileCompleted(profile) {
+  if (!profile || typeof profile !== "object") return false;
+  const fullName = typeof profile.full_name === "string" ? profile.full_name.trim() : "";
+  const prodi = typeof profile.prodi === "string" ? profile.prodi.trim() : "";
+  const angkatan =
+    profile.angkatan !== null && profile.angkatan !== undefined
+      ? String(profile.angkatan).trim()
+      : "";
+  return Boolean(fullName && prodi && angkatan);
+}
+
+const PROFILE_COLS = "full_name, avatar_url, prodi, angkatan, kota, pekerjaan, perusahaan";
 
 function tokenPayload(user) {
   return { userId: user.id, email: user.email, role: user.role };
@@ -186,6 +200,10 @@ function isMissingColumn(err, col) {
   );
 }
 
+function isProductionRuntime() {
+  return process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+}
+
 // Buat access+refresh token & simpan refresh token (1 query). `extra` = kolom tambahan yang ikut di-update.
 async function startSession(user, extra = {}) {
   const payload = tokenPayload(user);
@@ -207,6 +225,7 @@ async function startSession(user, extra = {}) {
 
 // Bentuk respons login (dipakai oleh /login dan /google — harus identik)
 function sessionResponse({ accessToken, refreshToken }, user, profile) {
+  const p = profile && typeof profile === "object" ? profile : {};
   return {
     access_token: accessToken,
     refresh_token: refreshToken,
@@ -214,9 +233,15 @@ function sessionResponse({ accessToken, refreshToken }, user, profile) {
       id: user.id,
       email: user.email,
       role: user.role,
-      full_name: profile.full_name ?? null,
-      avatar_url: profile.avatar_url ?? null,
+      full_name: p.full_name ?? null,
+      avatar_url: p.avatar_url ?? null,
+      prodi: p.prodi ?? null,
+      angkatan: p.angkatan ?? null,
+      kota: p.kota ?? null,
+      pekerjaan: p.pekerjaan ?? null,
+      perusahaan: p.perusahaan ?? null,
       has_password: hasPassword(user.password_hash),
+      profile_completed: isProfileCompleted(p),
     },
   };
 }
@@ -225,7 +250,7 @@ function sessionResponse({ accessToken, refreshToken }, user, profile) {
 router.post(
   "/send-otp",
   otpLimiter(10),
-  [body("email").isEmail().normalizeEmail().withMessage("Email tidak valid")],
+  [body("email").trim().isEmail().normalizeEmail().withMessage("Email tidak valid")],
   async (req, res, next) => {
     if (!validate(req, res)) return;
     try {
@@ -239,27 +264,59 @@ router.post(
         return res.status(400).json({ error: "Purpose OTP tidak valid" });
       }
 
-      const { data: existing, error } = await supabase
+      let { data: existing, error } = await supabase
         .from("users")
-        .select("id")
+        .select("id, password_hash, google_sub")
         .eq("email", email)
         .maybeSingle();
+      if (error && isMissingColumn(error, "google_sub")) {
+        ({ data: existing, error } = await supabase
+          .from("users")
+          .select("id, password_hash")
+          .eq("email", email)
+          .maybeSingle());
+      }
       if (error) throw error;
-      if (existing) return res.status(409).json({ error: "Email sudah terdaftar" });
+      if (existing) {
+        if (!hasPassword(existing.password_hash) && existing.google_sub) {
+          return res.status(409).json({
+            error:
+              "Email ini sudah terhubung dengan akun Google. Silakan masuk lewat tombol Lanjutkan dengan Google.",
+          });
+        }
+        return res.status(409).json({ error: "Email sudah terdaftar" });
+      }
+
+      if (isProductionRuntime() && !isEmailDeliveryConfigured()) {
+        console.error(
+          "[Auth] Layanan email OTP (SMTP/RESEND_API_KEY) belum dikonfigurasi di environment production"
+        );
+        return res.status(503).json({
+          error:
+            "Layanan email OTP belum aktif di server. Silakan masuk lewat Google atau hubungi admin.",
+        });
+      }
 
       const { otpCode, otpToken } = issueEmailOtp(email, purpose);
       let mailResult;
       try {
         mailResult = await sendOtpEmail({ to: email, otpCode, purpose });
       } catch (e) {
-        console.error("Send OTP email error:", e.message);
+        console.error("Send OTP email error:", e.code || "", e.responseCode || "", e.message);
         return res.status(502).json({ error: "Gagal mengirim email OTP. Silakan coba lagi." });
+      }
+
+      if (isProductionRuntime() && !mailResult.sent) {
+        return res.status(503).json({
+          error:
+            "Layanan email OTP belum aktif di server. Silakan masuk lewat Google atau hubungi admin.",
+        });
       }
 
       res.json({
         message: "Kode OTP telah dikirim ke email kamu",
         otp_token: otpToken,
-        ...(process.env.NODE_ENV !== "production" && !mailResult.sent ? { dev_otp: otpCode } : {}),
+        ...(!isProductionRuntime() && !mailResult.sent ? { dev_otp: otpCode } : {}),
       });
     } catch (err) {
       next(err);
@@ -273,6 +330,7 @@ router.post(
   authLimiter(),
   [
     body("email")
+      .trim()
       .isEmail()
       .normalizeEmail()
       .withMessage("Email tidak valid")
@@ -341,7 +399,13 @@ router.post(
           role: user.role,
           full_name,
           avatar_url: null,
+          prodi,
+          angkatan,
+          kota: kota || null,
+          pekerjaan: null,
+          perusahaan: null,
           has_password: true,
+          profile_completed: true,
         },
       });
     } catch (err) {
@@ -356,6 +420,7 @@ router.post(
   authLimiter(),
   [
     body("email")
+      .trim()
       .isEmail()
       .normalizeEmail()
       .withMessage("Email tidak valid")
@@ -372,7 +437,7 @@ router.post(
       // Cari user beserta profil
       const { data: user, error } = await supabase
         .from("users")
-        .select("id, email, password_hash, role, user_profiles(full_name, avatar_url)")
+        .select(`id, email, password_hash, role, user_profiles(${PROFILE_COLS})`)
         .eq("email", email)
         .maybeSingle();
       if (error) throw error;
@@ -414,6 +479,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
       full_name: profile.full_name ?? null,
       avatar_url: profile.avatar_url ?? null,
       has_password: hasPassword(user.password_hash),
+      profile_completed: isProfileCompleted(profile),
     });
   } catch (err) {
     next(err);
@@ -452,8 +518,8 @@ async function verifyGoogleIdToken(idToken, audience) {
   return ticket.getPayload();
 }
 
-const USER_COLS = "id, email, role, password_hash, google_sub, user_profiles(full_name, avatar_url)";
-const USER_COLS_LEGACY = "id, email, role, password_hash, user_profiles(full_name, avatar_url)";
+const USER_COLS = `id, email, role, password_hash, google_sub, user_profiles(${PROFILE_COLS})`;
+const USER_COLS_LEGACY = `id, email, role, password_hash, user_profiles(${PROFILE_COLS})`;
 
 async function findUserByGoogleOrEmail(sub, email) {
   let { data, error } = await supabase.from("users").select(USER_COLS).eq("google_sub", sub).maybeSingle();
@@ -480,7 +546,7 @@ async function ensureGoogleProfile(user, email, claims) {
       .from("user_profiles")
       .upsert({ user_id: user.id, full_name: fallbackName, avatar_url: picture }, { onConflict: "user_id" });
     if (error) throw error;
-    return { full_name: fallbackName, avatar_url: picture };
+    return { ...profile, full_name: fallbackName, avatar_url: picture };
   }
 
   if (!profile.avatar_url && picture) {
@@ -551,7 +617,15 @@ router.post(
             throw pErr;
           }
           user = created;
-          profile = { full_name: fullName, avatar_url: claims.picture || null };
+          profile = {
+            full_name: fullName,
+            avatar_url: claims.picture || null,
+            prodi: null,
+            angkatan: null,
+            kota: null,
+            pekerjaan: null,
+            perusahaan: null,
+          };
         } else {
           if (insErr.code !== "23505") throw insErr;
           // Race: request Google paralel membuat user yang sama -> pakai yang sudah ada
@@ -700,6 +774,133 @@ router.post(
   }
 );
 
+// ── POST /api/auth/complete-onboarding ────────────────────────────────────
+router.post("/complete-onboarding", requireAuth, authLimiter(), async (req, res, next) => {
+  try {
+    const { data: user, error } = await supabase
+      .from("users")
+      .select(`id, email, role, password_hash, refresh_token, user_profiles(${PROFILE_COLS})`)
+      .eq("id", req.user.userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!user) return res.status(404).json({ error: "User tidak ditemukan" });
+    if (!user.refresh_token) {
+      return res.status(401).json({ error: "Sesi sudah berakhir. Silakan masuk kembali." });
+    }
+
+    const body = req.body || {};
+    const existingProfile = firstProfile(user.user_profiles);
+    const alreadyHasPassword = hasPassword(user.password_hash);
+    const rawNewPassword = body.new_password;
+
+    if (!alreadyHasPassword) {
+      if (typeof rawNewPassword !== "string" || rawNewPassword.length < 8) {
+        return res.status(400).json({ error: "Password baru minimal 8 karakter" });
+      }
+      if (Buffer.byteLength(rawNewPassword, "utf8") > 72) {
+        return res.status(400).json({ error: "Password baru maksimal 72 karakter" });
+      }
+    } else if (rawNewPassword !== undefined && rawNewPassword !== null && rawNewPassword !== "") {
+      return res.status(400).json({
+        error: "Akun ini sudah memiliki kata sandi. Gunakan menu Ubah Kata Sandi.",
+      });
+    }
+
+    const rawName = body.full_name !== undefined ? body.full_name : existingProfile.full_name;
+    if (typeof rawName !== "string" || !rawName.trim() || rawName.trim().length > 100) {
+      return res.status(400).json({ error: "Nama lengkap wajib diisi (maks 100 karakter)" });
+    }
+    const full_name = rawName.trim();
+
+    const rawProdi = body.prodi !== undefined ? body.prodi : existingProfile.prodi;
+    if (typeof rawProdi !== "string" || !rawProdi.trim() || rawProdi.trim().length > 100) {
+      return res.status(400).json({ error: "Program studi wajib diisi (maks 100 karakter)" });
+    }
+    const prodi = rawProdi.trim();
+
+    const rawAngkatan = body.angkatan !== undefined ? body.angkatan : existingProfile.angkatan;
+    const angkatan =
+      typeof rawAngkatan === "string" || typeof rawAngkatan === "number"
+        ? String(rawAngkatan).trim()
+        : "";
+    if (!angkatan || angkatan.length > 20) {
+      return res.status(400).json({ error: "Angkatan wajib diisi (maks 20 karakter)" });
+    }
+
+    const optionalFields = {};
+    for (const field of ["kota", "pekerjaan", "perusahaan"]) {
+      if (body[field] !== undefined) {
+        const val = body[field];
+        if (val === null || val === "") {
+          optionalFields[field] = null;
+        } else if (typeof val === "string") {
+          const trimmed = val.trim();
+          if (trimmed.length > 100) {
+            return res.status(400).json({ error: `${field} maksimal 100 karakter` });
+          }
+          optionalFields[field] = trimmed || null;
+        } else {
+          return res.status(400).json({ error: `${field} tidak valid` });
+        }
+      } else {
+        optionalFields[field] = existingProfile[field] ?? null;
+      }
+    }
+
+    const { error: profErr } = await supabase.from("user_profiles").upsert(
+      {
+        user_id: user.id,
+        full_name,
+        prodi,
+        angkatan,
+        ...optionalFields,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+    if (profErr) throw profErr;
+
+    if (!alreadyHasPassword) {
+      const password_hash = await bcrypt.hash(rawNewPassword, BCRYPT_ROUNDS);
+      // Pertahankan refresh_token agar sesi login Google tetap aktif
+      const { data: updated, error: updErr } = await supabase
+        .from("users")
+        .update({ password_hash })
+        .eq("id", user.id)
+        .eq("password_hash", user.password_hash)
+        .select("id");
+      if (updErr) throw updErr;
+      if (!updated || updated.length === 0) {
+        return res.status(409).json({
+          error: "Akun ini sudah memiliki kata sandi. Gunakan menu Ubah Kata Sandi.",
+        });
+      }
+    }
+
+    res.json({
+      message: alreadyHasPassword
+        ? "Profil berhasil dilengkapi"
+        : "Profil dan kata sandi berhasil disimpan",
+      has_password: true,
+      profile_completed: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        full_name,
+        avatar_url: existingProfile.avatar_url ?? null,
+        prodi,
+        angkatan,
+        ...optionalFields,
+        has_password: true,
+        profile_completed: true,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── POST /api/auth/change-password ────────────────────────────────────────
 router.post(
   "/change-password",
@@ -761,6 +962,7 @@ router.post(
   otpLimiter(10),
   [
     body("email")
+      .trim()
       .isEmail()
       .normalizeEmail()
       .withMessage("Email tidak valid")
@@ -771,6 +973,15 @@ router.post(
   async (req, res, next) => {
     if (!validate(req, res)) return;
     try {
+      if (isProductionRuntime() && !isEmailDeliveryConfigured()) {
+        console.error(
+          "[Auth] Layanan email OTP (SMTP/RESEND_API_KEY) belum dikonfigurasi di environment production"
+        );
+        return res.status(503).json({
+          error: "Layanan email OTP belum aktif di server. Silakan hubungi admin.",
+        });
+      }
+
       const { email } = req.body;
       const { data: user, error } = await supabase
         .from("users")
@@ -808,12 +1019,18 @@ router.post(
       try {
         mailResult = await sendOtpEmail({ to: user.email, otpCode, purpose: "reset" });
       } catch (e) {
-        console.error("Send OTP email error:", e.message);
+        console.error("Send OTP email error:", e.code || "", e.responseCode || "", e.message);
         return res.status(502).json({ error: "Gagal mengirim email OTP. Silakan coba lagi." });
       }
 
+      if (isProductionRuntime() && !mailResult.sent) {
+        return res.status(503).json({
+          error: "Layanan email OTP belum aktif di server. Silakan hubungi admin.",
+        });
+      }
+
       const payload = { message: "Jika email terdaftar, kode OTP telah dikirim" };
-      if (process.env.NODE_ENV !== "production" && !mailResult.sent) {
+      if (!isProductionRuntime() && !mailResult.sent) {
         payload.dev_otp = otpCode;
       }
       res.json(payload);
@@ -829,6 +1046,7 @@ router.post(
   otpLimiter(15),
   [
     body("email")
+      .trim()
       .isEmail()
       .normalizeEmail()
       .withMessage("Email tidak valid")

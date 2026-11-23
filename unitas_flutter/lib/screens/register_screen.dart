@@ -677,6 +677,7 @@ class _EmailOtpSheetState extends State<_EmailOtpSheet> {
   bool _verifying = false;
   bool _resending = false;
   String? _errMsg;
+  String? _infoMsg;
   int _cooldown = 60;
   Timer? _timer;
 
@@ -719,6 +720,7 @@ class _EmailOtpSheetState extends State<_EmailOtpSheet> {
     setState(() {
       _verifying = true;
       _errMsg = null;
+      _infoMsg = null;
     });
     try {
       await widget.onVerify(_otpCtrl.text.trim(), _otpToken);
@@ -740,6 +742,7 @@ class _EmailOtpSheetState extends State<_EmailOtpSheet> {
     setState(() {
       _resending = true;
       _errMsg = null;
+      _infoMsg = null;
     });
     try {
       final res = await widget.onResend();
@@ -747,6 +750,7 @@ class _EmailOtpSheetState extends State<_EmailOtpSheet> {
       setState(() {
         _otpToken = res['otp_token']?.toString() ?? _otpToken;
         _devOtpHint = res['dev_otp']?.toString();
+        _infoMsg = 'Kode OTP baru telah dikirim. Periksa kotak masuk atau folder Spam.';
       });
       _startCooldown();
     } on ApiException catch (e) {
@@ -802,7 +806,41 @@ class _EmailOtpSheetState extends State<_EmailOtpSheet> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                const SizedBox(height: 6),
+                Text(
+                  'Belum menerima kode? Periksa folder Spam/Promosi di email kampusmu.',
+                  style: caption.copyWith(color: dim2, fontSize: 11.5),
+                ),
                 const SizedBox(height: 16),
+                if (_infoMsg != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: brandGreen.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: brandGreen.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.check_circle_outline,
+                          color: brandGreen,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _infoMsg!,
+                            style: caption.copyWith(color: brandNavy),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 if (_errMsg != null) ...[
                   AuthErrorBanner(message: _errMsg!),
                   const SizedBox(height: 10),

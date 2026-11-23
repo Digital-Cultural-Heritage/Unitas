@@ -92,12 +92,22 @@ router.get("/me", requireAuth, async (req, res, next) => {
 
     const rawProfile = data.user_profiles;
     const profile = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) || {};
+    const profileCompleted = Boolean(
+      typeof profile.full_name === "string" &&
+        profile.full_name.trim() &&
+        typeof profile.prodi === "string" &&
+        profile.prodi.trim() &&
+        profile.angkatan !== null &&
+        profile.angkatan !== undefined &&
+        String(profile.angkatan).trim()
+    );
     res.json({
       ...profile,
       id: data.id,
       email: data.email,
       role: data.role,
       has_password: typeof data.password_hash === "string" && data.password_hash.startsWith("$2"),
+      profile_completed: profileCompleted,
     });
   } catch (err) {
     next(err);

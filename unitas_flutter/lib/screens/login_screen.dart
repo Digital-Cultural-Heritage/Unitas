@@ -78,8 +78,37 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      await AuthService.login(_emailCtrl.text.trim(), _passCtrl.text);
+      final session = await AuthService.login(
+        _emailCtrl.text.trim(),
+        _passCtrl.text,
+      );
       if (!mounted) return;
+      final user = session['user'];
+      if (user is Map && user['profile_completed'] == false) {
+        final saved = await showGoogleOnboardingSheet(
+          context: context,
+          email: user['email']?.toString(),
+          initialFullName: user['full_name']?.toString(),
+          initialProdi: user['prodi']?.toString(),
+          initialAngkatan: user['angkatan']?.toString(),
+          initialKota: user['kota']?.toString(),
+          initialPekerjaan: user['pekerjaan']?.toString(),
+          initialPerusahaan: user['perusahaan']?.toString(),
+          requirePassword: false,
+          requireProfile: true,
+        );
+        if (!saved) {
+          await AuthService.logout();
+          return;
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profil alumni berhasil dilengkapi.'),
+          ),
+        );
+      }
+      if (!await AuthService.isLoggedIn() || !mounted) return;
       widget.onLoginSuccess();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -113,24 +142,37 @@ class _LoginScreenState extends State<LoginScreen> {
       final session = await action();
       if (!mounted || session == null) return;
       final user = session['user'];
-      final needsPassword = user is Map && user['has_password'] == false;
-      if (needsPassword) {
-        final saved = await showSetPasswordSheet(
+      final userMap = user is Map ? user : null;
+      final needsPassword = userMap?['has_password'] == false;
+      final needsProfile = userMap != null &&
+          (userMap.containsKey('profile_completed')
+              ? userMap['profile_completed'] == false
+              : needsPassword);
+      if (userMap != null && (needsPassword || needsProfile)) {
+        final saved = await showGoogleOnboardingSheet(
           context: context,
-          email: user['email']?.toString(),
-          isPostLoginPrompt: true,
+          email: userMap['email']?.toString(),
+          initialFullName: userMap['full_name']?.toString(),
+          initialProdi: userMap['prodi']?.toString(),
+          initialAngkatan: userMap['angkatan']?.toString(),
+          initialKota: userMap['kota']?.toString(),
+          initialPekerjaan: userMap['pekerjaan']?.toString(),
+          initialPerusahaan: userMap['perusahaan']?.toString(),
+          requirePassword: needsPassword,
+          requireProfile: needsProfile,
         );
         if (!saved) {
           await AuthService.logout();
           return;
         }
         if (!mounted) return;
+        final msg = needsPassword && needsProfile
+            ? 'Profil dilengkapi dan kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk langsung dengan email.'
+            : needsPassword
+                ? 'Kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk dengan email.'
+                : 'Profil alumni berhasil dilengkapi.';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Kata sandi berhasil dibuat. Kamu sekarang juga bisa masuk dengan email.',
-            ),
-          ),
+          SnackBar(content: Text(msg)),
         );
       }
       if (!await AuthService.isLoggedIn() || !mounted) return;
@@ -214,7 +256,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Khusus civitas & alumni Unud (@unud.ac.id atau @student.unud.ac.id). Pengguna baru bisa langsung masuk 1 klik lewat Google tanpa daftar manual.',
+                              'Khusus civitas & alumni Unud (@unud.ac.id atau @student.unud.ac.id). Akun Google dan login email kampus otomatis terhubung ke akun yang sama.',
                               style: caption.copyWith(
                                 color: brandNavy,
                                 height: 1.4,
@@ -654,6 +696,489 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 ),
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GoogleOnboardingData {
+  final String fullName;
+  final String prodi;
+  final String angkatan;
+  final String? kota;
+  final String? pekerjaan;
+  final String? perusahaan;
+  final String? newPassword;
+
+  const GoogleOnboardingData({
+    required this.fullName,
+    required this.prodi,
+    required this.angkatan,
+    this.kota,
+    this.pekerjaan,
+    this.perusahaan,
+    this.newPassword,
+  });
+}
+
+Future<bool> showGoogleOnboardingSheet({
+  required BuildContext context,
+  String? email,
+  String? initialFullName,
+  String? initialProdi,
+  String? initialAngkatan,
+  String? initialKota,
+  String? initialPekerjaan,
+  String? initialPerusahaan,
+  bool requirePassword = true,
+  bool requireProfile = true,
+  Future<void> Function(GoogleOnboardingData data)? onSave,
+}) async {
+  final saved = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    isDismissible: false,
+    enableDrag: false,
+    backgroundColor: brandBg,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => _GoogleOnboardingSheet(
+      email: email,
+      initialFullName: initialFullName,
+      initialProdi: initialProdi,
+      initialAngkatan: initialAngkatan,
+      initialKota: initialKota,
+      initialPekerjaan: initialPekerjaan,
+      initialPerusahaan: initialPerusahaan,
+      requirePassword: requirePassword,
+      requireProfile: requireProfile,
+      onSave: onSave ??
+          (data) async {
+            if (requireProfile) {
+              await AuthService.completeOnboarding(
+                fullName: data.fullName,
+                prodi: data.prodi,
+                angkatan: data.angkatan,
+                kota: data.kota,
+                pekerjaan: data.pekerjaan,
+                perusahaan: data.perusahaan,
+                newPassword: data.newPassword,
+              );
+            } else if (data.newPassword != null &&
+                data.newPassword!.isNotEmpty) {
+              await AuthService.setPassword(data.newPassword!);
+            }
+          },
+    ),
+  );
+  return saved == true;
+}
+
+class _GoogleOnboardingSheet extends StatefulWidget {
+  final String? email;
+  final String? initialFullName;
+  final String? initialProdi;
+  final String? initialAngkatan;
+  final String? initialKota;
+  final String? initialPekerjaan;
+  final String? initialPerusahaan;
+  final bool requirePassword;
+  final bool requireProfile;
+  final Future<void> Function(GoogleOnboardingData data) onSave;
+
+  const _GoogleOnboardingSheet({
+    this.email,
+    this.initialFullName,
+    this.initialProdi,
+    this.initialAngkatan,
+    this.initialKota,
+    this.initialPekerjaan,
+    this.initialPerusahaan,
+    required this.requirePassword,
+    required this.requireProfile,
+    required this.onSave,
+  });
+
+  @override
+  State<_GoogleOnboardingSheet> createState() => _GoogleOnboardingSheetState();
+}
+
+class _GoogleOnboardingSheetState extends State<_GoogleOnboardingSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl =
+      TextEditingController(text: widget.initialFullName ?? '');
+  late final TextEditingController _prodiCtrl =
+      TextEditingController(text: widget.initialProdi ?? '');
+  late final TextEditingController _angkCtrl =
+      TextEditingController(text: widget.initialAngkatan ?? '');
+  late final TextEditingController _kotaCtrl =
+      TextEditingController(text: widget.initialKota ?? '');
+  late final TextEditingController _pekerjaanCtrl =
+      TextEditingController(text: widget.initialPekerjaan ?? '');
+  late final TextEditingController _perusahaanCtrl =
+      TextEditingController(text: widget.initialPerusahaan ?? '');
+  final _passCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+
+  bool _busy = false;
+  bool _obscurePass = true;
+  bool _obscureConfirm = true;
+  String? _errMsg;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _prodiCtrl.dispose();
+    _angkCtrl.dispose();
+    _kotaCtrl.dispose();
+    _pekerjaanCtrl.dispose();
+    _perusahaanCtrl.dispose();
+    _passCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _errMsg = null;
+    });
+    try {
+      await widget.onSave(
+        GoogleOnboardingData(
+          fullName: _nameCtrl.text.trim(),
+          prodi: _prodiCtrl.text.trim(),
+          angkatan: _angkCtrl.text.trim(),
+          kota: _kotaCtrl.text.trim(),
+          pekerjaan: _pekerjaanCtrl.text.trim(),
+          perusahaan: _perusahaanCtrl.text.trim(),
+          newPassword: widget.requirePassword ? _passCtrl.text : null,
+        ),
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _errMsg = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errMsg = 'Tidak dapat terhubung ke server.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanEmail = widget.email?.trim() ?? '';
+    final titleText = widget.requireProfile && widget.requirePassword
+        ? 'Lengkapi Profil & Kata Sandi'
+        : (widget.requireProfile
+            ? 'Lengkapi Profil Alumni'
+            : 'Buat Kata Sandi');
+
+    final subtitleText = widget.requireProfile && widget.requirePassword
+        ? (cleanEmail.isNotEmpty
+            ? 'Lengkapi data alumni dan buat kata sandi untuk $cleanEmail agar kamu bisa masuk lewat Google maupun email langsung.'
+            : 'Lengkapi data alumni dan buat kata sandi agar kamu bisa masuk lewat Google maupun email langsung.')
+        : (widget.requireProfile
+            ? (cleanEmail.isNotEmpty
+                ? 'Lengkapi data alumni untuk akun $cleanEmail sebelum melanjutkan ke Unitas.'
+                : 'Lengkapi data alumni kamu sebelum melanjutkan ke Unitas.')
+            : (cleanEmail.isNotEmpty
+                ? 'Akun Google ($cleanEmail) wajib membuat kata sandi sebelum melanjutkan ke Unitas.'
+                : 'Akun Google kamu wajib membuat kata sandi sebelum melanjutkan ke Unitas.'));
+
+    return PopScope(
+      canPop: false,
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+          ),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              MediaQuery.viewInsetsOf(context).bottom + 24,
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(titleText, style: heading.copyWith(fontSize: 18)),
+                  const SizedBox(height: 6),
+                  Text(subtitleText, style: caption),
+                  const SizedBox(height: 16),
+                  if (_errMsg != null) ...[
+                    AuthErrorBanner(message: _errMsg!),
+                    const SizedBox(height: 12),
+                  ],
+                  if (widget.requireProfile) ...[
+                    Text(
+                      'PROFIL ALUMNI',
+                      style: label.copyWith(
+                        fontSize: 11,
+                        color: brandNavy,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _nameCtrl,
+                      enabled: !_busy,
+                      autofillHints: const [AutofillHints.name],
+                      textInputAction: TextInputAction.next,
+                      decoration: authInputDecoration(
+                        'Nama lengkap',
+                        Icons.person_outline,
+                      ),
+                      validator: (v) {
+                        final t = v?.trim() ?? '';
+                        if (t.isEmpty) return 'Nama lengkap wajib diisi';
+                        if (t.length > 100) return 'Maksimal 100 karakter';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: TextFormField(
+                            controller: _prodiCtrl,
+                            enabled: !_busy,
+                            textInputAction: TextInputAction.next,
+                            decoration: authInputDecoration(
+                              'Program Studi',
+                              Icons.school_outlined,
+                            ),
+                            validator: (v) {
+                              final t = v?.trim() ?? '';
+                              if (t.isEmpty) return 'Wajib diisi';
+                              if (t.length > 100) return 'Maks. 100 karakter';
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            controller: _angkCtrl,
+                            enabled: !_busy,
+                            keyboardType: TextInputType.number,
+                            textInputAction: TextInputAction.next,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(4),
+                            ],
+                            decoration: authInputDecoration(
+                              'Angkatan',
+                              Icons.calendar_today_outlined,
+                            ),
+                            validator: (v) {
+                              final t = v?.trim() ?? '';
+                              if (t.isEmpty) return 'Wajib diisi';
+                              if (!RegExp(r'^\d{4}$').hasMatch(t)) {
+                                return 'Harus 4 digit';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _kotaCtrl,
+                      enabled: !_busy,
+                      textInputAction: TextInputAction.next,
+                      decoration: authInputDecoration(
+                        'Kota Domisili (opsional)',
+                        Icons.location_on_outlined,
+                      ),
+                      validator: (v) {
+                        if (v != null && v.trim().length > 100) {
+                          return 'Maksimal 100 karakter';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _pekerjaanCtrl,
+                            enabled: !_busy,
+                            textInputAction: TextInputAction.next,
+                            decoration: authInputDecoration(
+                              'Pekerjaan (opsional)',
+                              Icons.work_outline,
+                            ),
+                            validator: (v) {
+                              if (v != null && v.trim().length > 100) {
+                                return 'Maks. 100 karakter';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _perusahaanCtrl,
+                            enabled: !_busy,
+                            textInputAction: widget.requirePassword
+                                ? TextInputAction.next
+                                : TextInputAction.done,
+                            onFieldSubmitted: widget.requirePassword
+                                ? null
+                                : (_) => _submit(),
+                            decoration: authInputDecoration(
+                              'Perusahaan (opsional)',
+                              Icons.business_outlined,
+                            ),
+                            validator: (v) {
+                              if (v != null && v.trim().length > 100) {
+                                return 'Maks. 100 karakter';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (widget.requireProfile && widget.requirePassword)
+                    const SizedBox(height: 18),
+                  if (widget.requirePassword) ...[
+                    Text(
+                      'KATA SANDI AKUN',
+                      style: label.copyWith(
+                        fontSize: 11,
+                        color: brandNavy,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Gunakan kata sandi ini agar kamu juga bisa masuk langsung menggunakan email kampus.',
+                      style: caption.copyWith(fontSize: 11.5),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _passCtrl,
+                      enabled: !_busy,
+                      obscureText: _obscurePass,
+                      autofillHints: const [AutofillHints.newPassword],
+                      textInputAction: TextInputAction.next,
+                      decoration: authInputDecoration(
+                        'Kata sandi baru (min 8 karakter)',
+                        Icons.lock_outline,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePass
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: dim2,
+                            size: 18,
+                          ),
+                          onPressed: () =>
+                              setState(() => _obscurePass = !_obscurePass),
+                        ),
+                      ),
+                      validator: (v) =>
+                          validateAuthPassword(v, checkMaxBytes: true),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _confirmCtrl,
+                      enabled: !_busy,
+                      obscureText: _obscureConfirm,
+                      autofillHints: const [AutofillHints.newPassword],
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _submit(),
+                      decoration: authInputDecoration(
+                        'Konfirmasi kata sandi',
+                        Icons.lock_outline,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureConfirm
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: dim2,
+                            size: 18,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscureConfirm = !_obscureConfirm,
+                          ),
+                        ),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) {
+                          return 'Konfirmasi kata sandi wajib diisi';
+                        }
+                        if (v != _passCtrl.text) {
+                          return 'Konfirmasi kata sandi tidak cocok';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: brandNavy,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    onPressed: _busy ? null : _submit,
+                    child: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text('Simpan & Lanjutkan', style: buttonStyle),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed:
+                        _busy ? null : () => Navigator.pop(context, false),
+                    child: Text(
+                      'Keluar',
+                      style: caption.copyWith(
+                        color: dim2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

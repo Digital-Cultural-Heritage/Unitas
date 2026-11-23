@@ -21,6 +21,11 @@ function getSmtpConfig() {
   return { host, port, secure, user, pass };
 }
 
+function isEmailDeliveryConfigured() {
+  const cfg = getSmtpConfig();
+  return Boolean((cfg.host && cfg.user && cfg.pass) || (process.env.RESEND_API_KEY || "").trim());
+}
+
 function getTransporter(cfg) {
   const key = `${cfg.host}|${cfg.port}|${cfg.secure}|${cfg.user}|${cfg.pass}`;
   if (cachedTransport && cachedTransportKey === key) {
@@ -30,6 +35,7 @@ function getTransporter(cfg) {
     host: cfg.host,
     port: cfg.port,
     secure: cfg.secure,
+    requireTLS: !cfg.secure,
     auth: {
       user: cfg.user,
       pass: cfg.pass,
@@ -71,6 +77,7 @@ async function sendOtpEmail({ to, otpCode, purpose = "login" }) {
   const from =
     (process.env.EMAIL_FROM || "").trim() ||
     (cfg.user ? `Unitas No-Reply <${cfg.user}>` : "Unitas No-Reply <noreply@unud.ac.id>");
+  const replyTo = (process.env.EMAIL_REPLY_TO || "").trim() || cfg.user || "noreply@unud.ac.id";
   const copy = purposeCopy(purpose);
   const safeCode = escapeHtml(otpCode);
 
@@ -110,14 +117,17 @@ async function sendOtpEmail({ to, otpCode, purpose = "login" }) {
 
   if (cfg.host && cfg.user && cfg.pass) {
     const transporter = getTransporter(cfg);
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from,
       to,
-      replyTo: "noreply@unud.ac.id",
+      replyTo,
       subject: copy.subject,
       text,
       html,
     });
+    if (Array.isArray(info?.rejected) && info.rejected.length > 0) {
+      throw new Error(`SMTP rejected recipient: ${info.rejected.join(", ")}`);
+    }
     return { sent: true, provider: "smtp" };
   }
 
@@ -131,7 +141,7 @@ async function sendOtpEmail({ to, otpCode, purpose = "login" }) {
       body: JSON.stringify({
         from,
         to: [to],
-        reply_to: "noreply@unud.ac.id",
+        reply_to: replyTo,
         subject: copy.subject,
         text,
         html,
@@ -139,7 +149,8 @@ async function sendOtpEmail({ to, otpCode, purpose = "login" }) {
       signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) {
-      throw new Error(`Resend HTTP ${r.status}`);
+      const errText = await r.text().catch(() => "");
+      throw new Error(`Resend HTTP ${r.status}${errText ? `: ${errText.slice(0, 200)}` : ""}`);
     }
     return { sent: true, provider: "resend" };
   }
@@ -150,4 +161,4 @@ async function sendOtpEmail({ to, otpCode, purpose = "login" }) {
   return { sent: false, provider: "console" };
 }
 
-module.exports = { sendOtpEmail };
+module.exports = { sendOtpEmail, isEmailDeliveryConfigured };

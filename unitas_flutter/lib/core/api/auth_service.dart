@@ -316,7 +316,65 @@ class AuthService {
     }
   }
 
-  // ── Password management ────────────────────────────────────────────────
+  // ── Password & onboarding management ───────────────────────────────────
+  static Future<Map<String, dynamic>> completeOnboarding({
+    required String fullName,
+    required String prodi,
+    required String angkatan,
+    String? kota,
+    String? pekerjaan,
+    String? perusahaan,
+    String? newPassword,
+  }) async {
+    final body = <String, dynamic>{
+      'full_name': fullName.trim(),
+      'prodi': prodi.trim(),
+      'angkatan': angkatan.trim(),
+    };
+    if (kota != null) body['kota'] = kota.trim();
+    if (pekerjaan != null) body['pekerjaan'] = pekerjaan.trim();
+    if (perusahaan != null) body['perusahaan'] = perusahaan.trim();
+    if (newPassword != null && newPassword.isNotEmpty) {
+      body['new_password'] = newPassword;
+    }
+
+    final res = await ApiClient.post(
+      '/api/auth/complete-onboarding',
+      body: body,
+    );
+    final map =
+        res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+    final user = map['user'];
+    if (user is Map) {
+      await ApiClient.saveStoredUserJson(jsonEncode(user));
+    } else {
+      final stored = await getStoredUser();
+      if (stored != null) {
+        stored['full_name'] = fullName.trim();
+        stored['prodi'] = prodi.trim();
+        stored['angkatan'] = angkatan.trim();
+        if (kota != null) {
+          final t = kota.trim();
+          stored['kota'] = t.isEmpty ? null : t;
+        }
+        if (pekerjaan != null) {
+          final t = pekerjaan.trim();
+          stored['pekerjaan'] = t.isEmpty ? null : t;
+        }
+        if (perusahaan != null) {
+          final t = perusahaan.trim();
+          stored['perusahaan'] = t.isEmpty ? null : t;
+        }
+        if (newPassword != null && newPassword.isNotEmpty) {
+          stored['has_password'] = true;
+        }
+        stored['profile_completed'] = true;
+        await ApiClient.saveStoredUserJson(jsonEncode(stored));
+      }
+    }
+    return map;
+  }
+
   static Future<void> setPassword(String newPassword) async {
     await ApiClient.post(
       '/api/auth/set-password',

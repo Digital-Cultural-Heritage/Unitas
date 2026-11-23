@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/theme/colors.dart';
@@ -361,6 +362,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final selectedImage = _selectedImage;
     final selectedBytes = _selectedImageBytes;
     if (text.isEmpty && selectedImage == null) return false;
+    if (mounted) FocusScope.of(context).unfocus();
     _posting = true;
     _postingNotifier.value = true;
     if (mounted) setState(() {});
@@ -499,6 +501,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _openComposerSheet({bool pickImageImmediately = false}) {
+    final shouldAutofocus = !pickImageImmediately;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -578,13 +581,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Expanded(
                         child: TextField(
                           controller: _postCtrl,
-                          autofocus: true,
+                          autofocus: shouldAutofocus,
                           maxLines: 6,
                           minLines: 3,
-                          style: body.copyWith(color: textPrimary),
+                          style: body.copyWith(
+                            color: textPrimary,
+                            fontSize: kIsWeb ? 16 : null,
+                          ),
                           decoration: InputDecoration(
                             hintText: 'Apa yang ingin kamu bagikan?',
-                            hintStyle: body.copyWith(color: dim2),
+                            hintStyle: body.copyWith(
+                              color: dim2,
+                              fontSize: kIsWeb ? 16 : null,
+                            ),
                             border: InputBorder.none,
                             isDense: true,
                             contentPadding: EdgeInsets.zero,

@@ -11,6 +11,7 @@ import 'package:unitas_flutter/core/utils/json_utils.dart';
 import 'package:unitas_flutter/screens/directory_screen.dart';
 import 'package:unitas_flutter/screens/login_screen.dart';
 import 'package:unitas_flutter/screens/profile_screen.dart';
+import 'package:unitas_flutter/screens/register_screen.dart';
 import 'package:unitas_flutter/widgets/avatar.dart';
 import 'package:unitas_flutter/widgets/linkable_text.dart';
 
@@ -496,5 +497,219 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+
+  testWidgets('showEmailOtpSheet displays spam hint, validates 6 digits, and supports resend & verify', (WidgetTester tester) async {
+    String? verifiedOtp;
+    String? verifiedToken;
+    var resendCalls = 0;
+    bool? sheetResult;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () async {
+                  sheetResult = await showEmailOtpSheet(
+                    context: context,
+                    email: 'mhs@student.unud.ac.id',
+                    title: 'Verifikasi Email Kampus',
+                    subtitle: 'Masukkan kode OTP 6 digit.',
+                    initialOtpToken: 'tok-1',
+                    onVerify: (otp, otpToken) async {
+                      verifiedOtp = otp;
+                      verifiedToken = otpToken;
+                    },
+                    onResend: () async {
+                      resendCalls++;
+                      return {'otp_token': 'tok-2'};
+                    },
+                  );
+                },
+                child: const Text('OpenOtp'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('OpenOtp'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Verifikasi Email Kampus'), findsOneWidget);
+    expect(find.text('mhs@student.unud.ac.id'), findsOneWidget);
+    expect(
+      find.text('Belum menerima kode? Periksa folder Spam/Promosi di email kampusmu.'),
+      findsOneWidget,
+    );
+
+    // Invalid/empty OTP fails validation
+    await tester.ensureVisible(find.text('Verifikasi Kode OTP'));
+    await tester.tap(find.text('Verifikasi Kode OTP'));
+    await tester.pump();
+    expect(find.text('Kode OTP harus 6 digit'), findsOneWidget);
+
+    // Wait out 60s cooldown so resend becomes active
+    for (var i = 0; i < 60; i++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    expect(find.text('Kirim Ulang OTP'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Kirim Ulang OTP'));
+    await tester.tap(find.text('Kirim Ulang OTP'));
+    await tester.pumpAndSettle();
+
+    expect(resendCalls, 1);
+    expect(
+      find.text('Kode OTP baru telah dikirim. Periksa kotak masuk atau folder Spam.'),
+      findsOneWidget,
+    );
+
+    // Valid 6-digit OTP uses latest token and closes with true
+    await tester.enterText(find.byType(TextFormField), '123456');
+    await tester.ensureVisible(find.text('Verifikasi Kode OTP'));
+    await tester.tap(find.text('Verifikasi Kode OTP'));
+    await tester.pumpAndSettle();
+
+    expect(verifiedOtp, '123456');
+    expect(verifiedToken, 'tok-2');
+    expect(sheetResult, isTrue);
+  });
+
+  testWidgets('showGoogleOnboardingSheet supports combined profile+password onboarding and profile-only mode', (WidgetTester tester) async {
+    GoogleOnboardingData? savedData;
+    bool? sheetResult;
+    var failFirst = true;
+    var requirePassword = true;
+    var requireProfile = true;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () async {
+                  sheetResult = await showGoogleOnboardingSheet(
+                    context: context,
+                    email: 'siti@student.unud.ac.id',
+                    initialFullName: 'Siti Alumni',
+                    requirePassword: requirePassword,
+                    requireProfile: requireProfile,
+                    onSave: (data) async {
+                      if (failFirst) {
+                        throw const ApiException('Gagal menyimpan profil', 500);
+                      }
+                      savedData = data;
+                    },
+                  );
+                },
+                child: const Text('OpenOnboard'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // 1. Combined mode (profile + password)
+    await tester.tap(find.text('OpenOnboard'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lengkapi Profil & Kata Sandi'), findsOneWidget);
+    expect(find.text('PROFIL ALUMNI'), findsOneWidget);
+    expect(find.text('KATA SANDI AKUN'), findsOneWidget);
+    expect(find.text('Siti Alumni'), findsOneWidget);
+
+    // Mandatory modal blocks back/maybePop
+    await Navigator.maybePop(tester.element(find.text('Lengkapi Profil & Kata Sandi')));
+    await tester.pumpAndSettle();
+    expect(find.text('Lengkapi Profil & Kata Sandi'), findsOneWidget);
+
+    // Validates required fields & 4-digit angkatan
+    await tester.ensureVisible(find.text('Simpan & Lanjutkan'));
+    await tester.tap(find.text('Simpan & Lanjutkan'));
+    await tester.pump();
+
+    expect(find.text('Wajib diisi'), findsNWidgets(2));
+    expect(find.text('Password minimal 8 karakter'), findsOneWidget);
+    expect(find.text('Konfirmasi kata sandi wajib diisi'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField).at(1), 'Informatika');
+    await tester.enterText(find.byType(TextFormField).at(2), '20');
+    await tester.ensureVisible(find.text('Simpan & Lanjutkan'));
+    await tester.tap(find.text('Simpan & Lanjutkan'));
+    await tester.pump();
+    expect(find.text('Harus 4 digit'), findsOneWidget);
+
+    // Fill valid profile + password; first attempt surfaces ApiException
+    await tester.enterText(find.byType(TextFormField).at(2), '2024');
+    await tester.enterText(find.byType(TextFormField).at(3), 'Denpasar');
+    await tester.enterText(find.byType(TextFormField).at(4), 'Engineer');
+    await tester.enterText(find.byType(TextFormField).at(5), 'PT Bali');
+    await tester.enterText(find.byType(TextFormField).at(6), 'Password123');
+    await tester.enterText(find.byType(TextFormField).at(7), 'Password123');
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'Simpan & Lanjutkan'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Simpan & Lanjutkan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gagal menyimpan profil'), findsOneWidget);
+    expect(savedData, isNull);
+
+    // Retry succeeds with complete GoogleOnboardingData
+    failFirst = false;
+    await tester.ensureVisible(find.text('Simpan & Lanjutkan'));
+    await tester.tap(find.text('Simpan & Lanjutkan'));
+    await tester.pumpAndSettle();
+
+    expect(sheetResult, isTrue);
+    expect(savedData, isNotNull);
+    expect(savedData!.fullName, 'Siti Alumni');
+    expect(savedData!.prodi, 'Informatika');
+    expect(savedData!.angkatan, '2024');
+    expect(savedData!.kota, 'Denpasar');
+    expect(savedData!.pekerjaan, 'Engineer');
+    expect(savedData!.perusahaan, 'PT Bali');
+    expect(savedData!.newPassword, 'Password123');
+
+    // Tapping "Keluar" pops false without saving
+    savedData = null;
+    sheetResult = null;
+    await tester.tap(find.text('OpenOnboard'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Keluar'));
+    await tester.tap(find.text('Keluar'));
+    await tester.pumpAndSettle();
+    expect(sheetResult, isFalse);
+    expect(savedData, isNull);
+
+    // 2. Profile-only mode (legacy user who already has password)
+    requirePassword = false;
+    requireProfile = true;
+    savedData = null;
+    sheetResult = null;
+
+    await tester.tap(find.text('OpenOnboard'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lengkapi Profil Alumni'), findsOneWidget);
+    expect(find.text('KATA SANDI AKUN'), findsNothing);
+    expect(find.byType(TextFormField), findsNWidgets(6));
+
+    await tester.enterText(find.byType(TextFormField).at(1), 'Elektro');
+    await tester.enterText(find.byType(TextFormField).at(2), '2021');
+    await tester.ensureVisible(find.text('Simpan & Lanjutkan'));
+    await tester.tap(find.text('Simpan & Lanjutkan'));
+    await tester.pumpAndSettle();
+
+    expect(sheetResult, isTrue);
+    expect(savedData!.prodi, 'Elektro');
+    expect(savedData!.angkatan, '2021');
+    expect(savedData!.newPassword, isNull);
   });
 }

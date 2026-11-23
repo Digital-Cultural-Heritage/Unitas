@@ -323,10 +323,11 @@ describe("Unitas Backend API", () => {
 
   it("Protected endpoints reject unauthenticated requests with 401", async () => {
     const sampleId = "11111111-1111-4111-8111-111111111111";
-    const [meRes, delMeRes, setPwRes, postsRes, notifRes, msgRes, jobsRes, appliedRes, applyRes, applicantsRes, statusRes, cvRes] = await Promise.all([
+    const [meRes, delMeRes, setPwRes, onboardRes, postsRes, notifRes, msgRes, jobsRes, appliedRes, applyRes, applicantsRes, statusRes, cvRes] = await Promise.all([
       request("GET", "/api/auth/me"),
       request("DELETE", "/api/users/me"),
       request("POST", "/api/auth/set-password", { new_password: "Password123" }),
+      request("POST", "/api/auth/complete-onboarding", { full_name: "Test", prodi: "TI", angkatan: "2022" }),
       request("POST", "/api/posts", { content: "Halo" }),
       request("GET", "/api/notifications"),
       request("GET", "/api/messages/conversations"),
@@ -340,6 +341,7 @@ describe("Unitas Backend API", () => {
     assert.equal(meRes.status, 401);
     assert.equal(delMeRes.status, 401);
     assert.equal(setPwRes.status, 401);
+    assert.equal(onboardRes.status, 401);
     assert.equal(postsRes.status, 401);
     assert.equal(notifRes.status, 401);
     assert.equal(msgRes.status, 401);
@@ -511,9 +513,23 @@ describe("Unitas Backend API", () => {
       assert.deepEqual(Object.keys(login.body).sort(), ["access_token", "refresh_token", "user"]);
       assert.deepEqual(
         Object.keys(login.body.user).sort(),
-        ["avatar_url", "email", "full_name", "has_password", "id", "role"]
+        [
+          "angkatan",
+          "avatar_url",
+          "email",
+          "full_name",
+          "has_password",
+          "id",
+          "kota",
+          "pekerjaan",
+          "perusahaan",
+          "prodi",
+          "profile_completed",
+          "role",
+        ]
       );
       assert.equal(login.body.user.has_password, true);
+      assert.equal(login.body.user.profile_completed, true);
       assert.equal(login.body.user.password_hash, undefined);
 
       // GET /api/auth/me
@@ -617,11 +633,25 @@ describe("Unitas Backend API", () => {
       assert.deepEqual(Object.keys(createdRes.body).sort(), ["access_token", "refresh_token", "user"]);
       assert.deepEqual(
         Object.keys(createdRes.body.user).sort(),
-        ["avatar_url", "email", "full_name", "has_password", "id", "role"]
+        [
+          "angkatan",
+          "avatar_url",
+          "email",
+          "full_name",
+          "has_password",
+          "id",
+          "kota",
+          "pekerjaan",
+          "perusahaan",
+          "prodi",
+          "profile_completed",
+          "role",
+        ]
       );
       assert.equal(createdRes.body.user.full_name, "Siti Alumni");
       assert.equal(createdRes.body.user.avatar_url, "https://lh3.googleusercontent.com/a/avatar");
       assert.equal(createdRes.body.user.has_password, false);
+      assert.equal(createdRes.body.user.profile_completed, false);
       assert.equal(createdRes.body.user.password_hash, undefined);
 
       // Google-only user cannot log in with password
@@ -957,11 +987,13 @@ describe("Unitas Backend API", () => {
         SMTP_USER: process.env.SMTP_USER,
         SMTP_PASS: process.env.SMTP_PASS,
         EMAIL_FROM: process.env.EMAIL_FROM,
+        EMAIL_REPLY_TO: process.env.EMAIL_REPLY_TO,
       };
       process.env.SMTP_HOST = "smtp.gmail.com";
       process.env.SMTP_USER = "unitas.noreply@gmail.com";
       process.env.SMTP_PASS = "app-password-test";
       process.env.EMAIL_FROM = "Unitas No-Reply <noreply@unud.ac.id>";
+      delete process.env.EMAIL_REPLY_TO;
 
       try {
         const res = await request("POST", "/api/auth/send-otp", {
@@ -973,7 +1005,7 @@ describe("Unitas Backend API", () => {
         assert.ok(res.body.otp_token);
         assert.equal(sentMails.length, 1);
         assert.equal(sentMails[0].to, "smtp.test@student.unud.ac.id");
-        assert.equal(sentMails[0].replyTo, "noreply@unud.ac.id");
+        assert.equal(sentMails[0].replyTo, "unitas.noreply@gmail.com");
         assert.match(sentMails[0].text, /\d{6}/);
 
         // Registered user hitting forgot-password when SMTP fails must receive 502 (not silent 200)
@@ -1431,6 +1463,339 @@ describe("Unitas Backend API", () => {
       });
       assert.equal(relogin.status, 200);
       assert.equal(relogin.body.user.has_password, true);
+    });
+  });
+
+  describe("OTP delivery hardening & Google duplicate account handling", () => {
+    let db;
+    let googleMock;
+    let otpServer;
+    let prevBaseUrl;
+    let savedIndexCache;
+    let savedAuthCache;
+    const savedEnv = {};
+
+    before(async () => {
+      prevBaseUrl = baseUrl;
+      const indexPath = require.resolve("../api/index");
+      const authPath = require.resolve("../src/routes/auth");
+      savedIndexCache = require.cache[indexPath];
+      savedAuthCache = require.cache[authPath];
+      delete require.cache[indexPath];
+      delete require.cache[authPath];
+
+      const otpApp = require("../api/index");
+      otpServer = otpApp.listen(0);
+      await new Promise((resolve) => otpServer.once("listening", resolve));
+      const { port } = otpServer.address();
+      baseUrl = `http://127.0.0.1:${port}`;
+    });
+
+    after(async () => {
+      if (otpServer) await new Promise((resolve) => otpServer.close(resolve));
+      baseUrl = prevBaseUrl;
+      const indexPath = require.resolve("../api/index");
+      const authPath = require.resolve("../src/routes/auth");
+      if (savedIndexCache) require.cache[indexPath] = savedIndexCache;
+      else delete require.cache[indexPath];
+      if (savedAuthCache) require.cache[authPath] = savedAuthCache;
+      else delete require.cache[authPath];
+    });
+
+    beforeEach(() => {
+      db = createMockDb();
+      mock.method(supabase, "from", (table) => db.from(table));
+
+      const { OAuth2Client } = require("google-auth-library");
+      googleMock = mock.method(OAuth2Client.prototype, "verifyIdToken", async () => {
+        throw new Error("unexpected verifyIdToken call");
+      });
+
+      for (const k of [
+        "NODE_ENV",
+        "VERCEL",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_SERVER_CLIENT_IDS",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_SECURE",
+        "SMTP_USER",
+        "SMTP_PASS",
+        "RESEND_API_KEY",
+        "EMAIL_FROM",
+        "EMAIL_REPLY_TO",
+      ]) {
+        savedEnv[k] = process.env[k];
+      }
+      process.env.NODE_ENV = "test";
+      delete process.env.VERCEL;
+      process.env.GOOGLE_CLIENT_ID = "web-client-1.apps.googleusercontent.com";
+      delete process.env.GOOGLE_SERVER_CLIENT_IDS;
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+      delete process.env.RESEND_API_KEY;
+    });
+
+    afterEach(() => {
+      mock.restoreAll();
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    });
+
+    it("fails with 503 in production when SMTP/Resend env vars are missing", async () => {
+      process.env.NODE_ENV = "production";
+      delete process.env.SMTP_HOST;
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+      delete process.env.RESEND_API_KEY;
+
+      const sendOtpRes = await request("POST", "/api/auth/send-otp", {
+        email: "prod.check@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(sendOtpRes.status, 503);
+      assert.equal(sendOtpRes.body.dev_otp, undefined);
+
+      const forgotRes = await request("POST", "/api/auth/forgot-password", {
+        email: "prod.check@student.unud.ac.id",
+      });
+      assert.equal(forgotRes.status, 503);
+      assert.equal(forgotRes.body.dev_otp, undefined);
+    });
+
+    it("returns 502 when SMTP rejects the recipient", async () => {
+      const nodemailer = require("nodemailer");
+      let createTransportCalls = 0;
+      mock.method(nodemailer, "createTransport", () => {
+        createTransportCalls++;
+        return {
+          sendMail: async () => ({
+            messageId: "smtp-rej-1",
+            rejected: ["user@student.unud.ac.id"],
+          }),
+        };
+      });
+
+      process.env.SMTP_HOST = "smtp.gmail.com";
+      process.env.SMTP_USER = "unitas.rejected.test@gmail.com";
+      process.env.SMTP_PASS = "app-password-rejected-test";
+
+      const res = await request("POST", "/api/auth/send-otp", {
+        email: "user@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(res.status, 502);
+      assert.equal(createTransportCalls, 1);
+    });
+
+    it("returns 409 with Google sign-in guidance when email belongs to a Google-only account", async () => {
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-only-dup-1",
+          email: "google.user@student.unud.ac.id",
+          email_verified: true,
+          name: "Google User",
+        }),
+      }));
+      const gRes = await request("POST", "/api/auth/google", { id_token: "g-only-tok" });
+      assert.equal(gRes.status, 200);
+      assert.equal(gRes.body.user.has_password, false);
+
+      const otpRes = await request("POST", "/api/auth/send-otp", {
+        email: "google.user@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(otpRes.status, 409);
+      assert.match(otpRes.body.error, /Google/);
+    });
+
+    it("supports bidirectional Google <-> Email login and atomic complete-onboarding", async () => {
+      // 1. Brand-new Google user starts with has_password: false, profile_completed: false
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-onboard-1",
+          email: "Onboard.Google@student.unud.ac.id",
+          email_verified: true,
+          name: "Onboard Google",
+          picture: "https://lh3.googleusercontent.com/a/onboard",
+        }),
+      }));
+      const gNew = await request("POST", "/api/auth/google", { id_token: "g-onboard-tok" });
+      assert.equal(gNew.status, 200);
+      assert.equal(gNew.body.user.has_password, false);
+      assert.equal(gNew.body.user.profile_completed, false);
+      const googleUserId = gNew.body.user.id;
+      const gHeaders = { Authorization: `Bearer ${gNew.body.access_token}` };
+
+      // Missing prodi/angkatan/new_password rejected with 400
+      const badOnboard = await request(
+        "POST",
+        "/api/auth/complete-onboarding",
+        { full_name: "Onboard Google", prodi: "", angkatan: "2024", new_password: "123" },
+        gHeaders
+      );
+      assert.equal(badOnboard.status, 400);
+
+      // Logged-out session cannot complete onboarding
+      await request("POST", "/api/auth/logout", { refresh_token: gNew.body.refresh_token });
+      const loggedOutOnboard = await request(
+        "POST",
+        "/api/auth/complete-onboarding",
+        { full_name: "Onboard Google", prodi: "Informatika", angkatan: "2024", new_password: "Password123" },
+        gHeaders
+      );
+      assert.equal(loggedOutOnboard.status, 401);
+
+      // Re-login with Google and complete onboarding atomically
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-onboard-1",
+          email: "Onboard.Google@student.unud.ac.id",
+          email_verified: true,
+          name: "Onboard Google",
+          picture: "https://lh3.googleusercontent.com/a/onboard",
+        }),
+      }));
+      const gActive = await request("POST", "/api/auth/google", { id_token: "g-onboard-tok-2" });
+      assert.equal(gActive.status, 200);
+
+      const onboardRes = await request(
+        "POST",
+        "/api/auth/complete-onboarding",
+        {
+          full_name: "Onboard Alumni",
+          prodi: "Informatika",
+          angkatan: "2024",
+          kota: "Denpasar",
+          pekerjaan: "Software Engineer",
+          perusahaan: "PT Bali Tech",
+          new_password: "GoogleEmailPass1",
+        },
+        { Authorization: `Bearer ${gActive.body.access_token}` }
+      );
+      assert.equal(onboardRes.status, 200);
+      assert.equal(onboardRes.body.has_password, true);
+      assert.equal(onboardRes.body.profile_completed, true);
+      assert.equal(onboardRes.body.user.id, googleUserId);
+      assert.equal(onboardRes.body.user.avatar_url, "https://lh3.googleusercontent.com/a/onboard");
+      assert.equal(onboardRes.body.user.prodi, "Informatika");
+      assert.equal(onboardRes.body.user.angkatan, "2024");
+      assert.equal(onboardRes.body.user.kota, "Denpasar");
+      assert.equal(onboardRes.body.user.pekerjaan, "Software Engineer");
+      assert.equal(onboardRes.body.user.perusahaan, "PT Bali Tech");
+
+      // 2. Google-created user logs in directly with Email + Password -> exact same account
+      const emailLogin = await request("POST", "/api/auth/login", {
+        email: "onboard.google@student.unud.ac.id",
+        password: "GoogleEmailPass1",
+      });
+      assert.equal(emailLogin.status, 200);
+      assert.equal(emailLogin.body.user.id, googleUserId);
+      assert.equal(emailLogin.body.user.has_password, true);
+      assert.equal(emailLogin.body.user.profile_completed, true);
+      assert.equal(emailLogin.body.user.full_name, "Onboard Alumni");
+      assert.equal(emailLogin.body.user.prodi, "Informatika");
+      assert.equal(emailLogin.body.user.angkatan, "2024");
+      assert.equal(emailLogin.body.user.kota, "Denpasar");
+      assert.equal(emailLogin.body.user.avatar_url, "https://lh3.googleusercontent.com/a/onboard");
+
+      // 3. Email-registered user logs in via Google (even with mixed-case email) -> exact same account
+      const regOtp = await request("POST", "/api/auth/send-otp", {
+        email: "Email.First@student.unud.ac.id",
+        purpose: "register",
+      });
+      assert.equal(regOtp.status, 200);
+      const regRes = await request("POST", "/api/auth/register", {
+        email: "Email.First@student.unud.ac.id",
+        password: "EmailFirstPass1",
+        full_name: "Email First User",
+        prodi: "Sistem Informasi",
+        angkatan: "2022",
+        kota: "Badung",
+        otp: regOtp.body.dev_otp,
+        otp_token: regOtp.body.otp_token,
+      });
+      assert.equal(regRes.status, 201);
+      assert.equal(regRes.body.user.profile_completed, true);
+      const emailUserId = regRes.body.user.id;
+
+      googleMock.mock.mockImplementationOnce(async () => ({
+        getPayload: () => ({
+          sub: "g-linked-email-first",
+          email: "EMAIL.FIRST@student.unud.ac.id",
+          email_verified: true,
+          name: "Ignored Google Name",
+          picture: "https://lh3.googleusercontent.com/a/email-first",
+        }),
+      }));
+      const linkedGoogle = await request("POST", "/api/auth/google", { id_token: "link-email-first-tok" });
+      assert.equal(linkedGoogle.status, 200);
+      assert.equal(linkedGoogle.body.user.id, emailUserId);
+      assert.equal(linkedGoogle.body.user.has_password, true);
+      assert.equal(linkedGoogle.body.user.profile_completed, true);
+      assert.equal(linkedGoogle.body.user.full_name, "Email First User");
+      assert.equal(linkedGoogle.body.user.prodi, "Sistem Informasi");
+      assert.equal(linkedGoogle.body.user.angkatan, "2022");
+      assert.equal(linkedGoogle.body.user.kota, "Badung");
+
+      // Both Email and Google logins continue working for the linked account
+      const emailAgain = await request("POST", "/api/auth/login", {
+        email: "email.first@student.unud.ac.id",
+        password: "EmailFirstPass1",
+      });
+      assert.equal(emailAgain.status, 200);
+      assert.equal(emailAgain.body.user.id, emailUserId);
+
+      // 4. Legacy user with password already set but incomplete profile completes profile without new_password
+      const legacyId = crypto.randomUUID();
+      const legacyHash = await require("bcryptjs").hash("LegacyPass123", 4);
+      db.tables.users.push({
+        id: legacyId,
+        email: "legacy.noprofile@unud.ac.id",
+        password_hash: legacyHash,
+        role: "alumni",
+        google_sub: "g-legacy-1",
+      });
+      db.tables.user_profiles.push({
+        id: crypto.randomUUID(),
+        user_id: legacyId,
+        full_name: "Legacy Google User",
+        avatar_url: null,
+        prodi: null,
+        angkatan: null,
+      });
+
+      const legacyLogin = await request("POST", "/api/auth/login", {
+        email: "legacy.noprofile@unud.ac.id",
+        password: "LegacyPass123",
+      });
+      assert.equal(legacyLogin.status, 200);
+      assert.equal(legacyLogin.body.user.has_password, true);
+      assert.equal(legacyLogin.body.user.profile_completed, false);
+
+      // Sending new_password when password already exists must return 400
+      const rejectPw = await request(
+        "POST",
+        "/api/auth/complete-onboarding",
+        { full_name: "Legacy Google User", prodi: "Elektro", angkatan: "2020", new_password: "NewPassword1" },
+        { Authorization: `Bearer ${legacyLogin.body.access_token}` }
+      );
+      assert.equal(rejectPw.status, 400);
+
+      // Completing profile without new_password succeeds
+      const legacyDone = await request(
+        "POST",
+        "/api/auth/complete-onboarding",
+        { full_name: "Legacy Google User", prodi: "Elektro", angkatan: "2020" },
+        { Authorization: `Bearer ${legacyLogin.body.access_token}` }
+      );
+      assert.equal(legacyDone.status, 200);
+      assert.equal(legacyDone.body.has_password, true);
+      assert.equal(legacyDone.body.profile_completed, true);
+      assert.equal(legacyDone.body.user.prodi, "Elektro");
+      assert.equal(legacyDone.body.user.angkatan, "2020");
     });
   });
 });
