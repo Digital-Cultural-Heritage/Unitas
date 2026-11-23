@@ -1004,9 +1004,14 @@ describe("Unitas Backend API", () => {
         assert.equal(res.body.dev_otp, undefined);
         assert.ok(res.body.otp_token);
         assert.equal(sentMails.length, 1);
+        assert.equal(sentMails[0].from, "Unitas <unitas.noreply@gmail.com>");
         assert.equal(sentMails[0].to, "smtp.test@student.unud.ac.id");
         assert.equal(sentMails[0].replyTo, "unitas.noreply@gmail.com");
+        assert.match(sentMails[0].subject, /\d{6}/);
         assert.match(sentMails[0].text, /\d{6}/);
+        assert.match(sentMails[0].html, /\d{6}/);
+        assert.doesNotMatch(sentMails[0].text, /no-reply/i);
+        assert.doesNotMatch(sentMails[0].html, /no-reply/i);
 
         // Registered user hitting forgot-password when SMTP fails must receive 502 (not silent 200)
         db.tables.users.push({

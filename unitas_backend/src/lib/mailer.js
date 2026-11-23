@@ -48,69 +48,105 @@ function getTransporter(cfg) {
   return cachedTransport;
 }
 
-function purposeCopy(purpose) {
+function purposeCopy(purpose, otpCode) {
   switch (purpose) {
     case "register":
       return {
-        subject: "Kode Verifikasi Pendaftaran Unitas",
+        subject: `${otpCode} adalah kode verifikasi Unitas Anda`,
         heading: "Verifikasi Email Kampus",
         actionText: "melengkapi pendaftaran akun Unitas Anda",
       };
     case "reset":
       return {
-        subject: "Kode Reset Kata Sandi Unitas",
-        heading: "Reset Kata Sandi",
+        subject: `${otpCode} adalah kode reset kata sandi Unitas Anda`,
+        heading: "Reset Kata Sandi Unitas",
         actionText: "mengatur ulang kata sandi akun Unitas Anda",
       };
     case "login":
     default:
       return {
-        subject: "Kode OTP Masuk Unitas",
-        heading: "Verifikasi Login Unitas",
+        subject: `${otpCode} adalah kode masuk Unitas Anda`,
+        heading: "Verifikasi Masuk Unitas",
         actionText: "masuk ke akun Unitas Anda",
       };
   }
 }
 
+function extractEmailAddress(raw) {
+  const m = String(raw || "").match(/<([^>]+)>/);
+  if (m && m[1]) return m[1].trim();
+  const trimmed = String(raw || "").trim();
+  return trimmed.includes("@") ? trimmed : "";
+}
+
+function extractDisplayName(raw) {
+  const str = String(raw || "").trim();
+  const angleIdx = str.indexOf("<");
+  if (angleIdx > 0) {
+    const name = str.slice(0, angleIdx).trim().replace(/^["']|["']$/g, "");
+    if (name && !/no-?reply/i.test(name)) return name;
+  }
+  return "Unitas";
+}
+
+function resolveSenderAddresses(cfg) {
+  const rawFrom = (process.env.EMAIL_FROM || "").trim();
+  const displayName = extractDisplayName(rawFrom);
+  const isGmailSmtp = Boolean(cfg.host.toLowerCase().includes("gmail.com") && cfg.user);
+
+  let from;
+  if (isGmailSmtp) {
+    from = `${displayName} <${cfg.user}>`;
+  } else if (rawFrom) {
+    from = rawFrom;
+  } else {
+    from = cfg.user ? `${displayName} <${cfg.user}>` : "Unitas <noreply@unud.ac.id>";
+  }
+
+  const rawReplyTo = (process.env.EMAIL_REPLY_TO || "").trim();
+  const replyTo = rawReplyTo || cfg.user || extractEmailAddress(from) || "noreply@unud.ac.id";
+  return { from, replyTo };
+}
+
 async function sendOtpEmail({ to, otpCode, purpose = "login" }) {
   const cfg = getSmtpConfig();
-  const from =
-    (process.env.EMAIL_FROM || "").trim() ||
-    (cfg.user ? `Unitas No-Reply <${cfg.user}>` : "Unitas No-Reply <noreply@unud.ac.id>");
-  const replyTo = (process.env.EMAIL_REPLY_TO || "").trim() || cfg.user || "noreply@unud.ac.id";
-  const copy = purposeCopy(purpose);
+  const { from, replyTo } = resolveSenderAddresses(cfg);
+  const copy = purposeCopy(purpose, otpCode);
   const safeCode = escapeHtml(otpCode);
+  const preheaderText = `Kode verifikasi Unitas Anda: ${otpCode} (berlaku 15 menit).`;
 
   const text = [
-    `${copy.heading} - Unitas`,
+    preheaderText,
     "",
-    `Gunakan kode OTP berikut untuk ${copy.actionText}:`,
+    copy.heading,
+    `Gunakan kode 6 digit di atas untuk ${copy.actionText}.`,
     "",
-    `    ${otpCode}`,
+    "Demi keamanan, jangan bagikan kode ini kepada siapa pun.",
+    "Jika Anda tidak meminta kode ini, silakan abaikan email ini.",
     "",
-    "Kode ini berlaku selama 15 menit. Jangan bagikan kode ini kepada siapa pun.",
-    "",
-    "Ini adalah email otomatis (no-reply), mohon tidak membalas email ini.",
+    "Salam,",
+    "Tim Unitas",
   ].join("\n");
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; background: #FDFBF7; border: 1px solid #E5E7EB; border-radius: 12px; color: #1E293B;">
-      <div style="margin-bottom: 16px;">
-        <strong style="font-size: 20px; color: #1E3A5F;">Unitas</strong>
-      </div>
-      <h2 style="margin: 0 0 8px; font-size: 18px; color: #1E3A5F;">${escapeHtml(copy.heading)}</h2>
-      <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.5;">
-        Gunakan kode OTP 6 digit berikut untuk ${escapeHtml(copy.actionText)}:
+      <span style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">${escapeHtml(preheaderText)}</span>
+      <p style="margin: 0 0 12px; font-size: 18px; font-weight: 700; color: #1E3A5F;">Unitas</p>
+      <p style="margin: 0 0 8px; font-size: 16px; font-weight: 600; color: #1E3A5F;">${escapeHtml(copy.heading)}</p>
+      <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: #334155;">
+        Gunakan kode 6 digit berikut untuk ${escapeHtml(copy.actionText)}:
       </p>
-      <div style="background: #1E3A5F; color: #FFFFFF; font-size: 28px; font-weight: 700; letter-spacing: 6px; text-align: center; padding: 14px 20px; border-radius: 10px; margin-bottom: 20px;">
+      <div style="background: #F5F2EC; border: 1px solid #E2E8F0; color: #1E3A5F; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px; text-align: center; padding: 14px 20px; border-radius: 10px; margin-bottom: 16px;">
         ${safeCode}
       </div>
-      <p style="margin: 0 0 12px; font-size: 13px; color: #475569;">
+      <p style="margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: #475569;">
         Kode ini berlaku selama <strong>15 menit</strong>. Demi keamanan, jangan bagikan kode ini kepada siapa pun.
       </p>
-      <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 16px 0;" />
-      <p style="margin: 0; font-size: 12px; color: #64748B;">
-        Ini adalah email otomatis (no-reply), mohon tidak membalas email ini.
+      <p style="margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: #475569;">
+        Jika Anda tidak meminta kode ini, silakan abaikan email ini.
+      </p>
+      <p style="margin: 0; font-size: 13px; color: #475569;">
+        Salam,<br />Tim Unitas
       </p>
     </div>
   `.trim();
